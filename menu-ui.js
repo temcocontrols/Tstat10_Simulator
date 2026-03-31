@@ -5,7 +5,6 @@ export function renderMenuHeader(lcd, data) {
     const headerData = data.widgets[0];
     const header = document.createElement('div');
     header.style.textAlign = 'center';
-    header.style.fontWeight = 'bold';
     header.style.fontWeight = data.styles?.fontWeight || 'bold';
     header.style.fontSize = data.styles?.fontSize || headerData.fontSize || '22px';
     header.style.marginTop = '36px';
@@ -37,7 +36,6 @@ export function renderMenuRows(lcd, data, menuRowsFocusedIndex) {
         row.style.borderRadius = '8px';
         row.style.background = (idx === menuRowsFocusedIndex) ? (data.styles?.highlight || '#008080') : 'rgba(0,0,0,0.08)';
         row.style.fontSize = baseFontSize + 'px';
-        row.style.fontFamily = data.styles?.fontFamily || 'Segoe UI, Arial, sans-serif';
         row.style.fontWeight = data.styles?.fontWeight || 'bold';
         row.style.fontFamily = data.styles?.fontFamily || 'monospace';
         row.style.gap = '0';
@@ -56,7 +54,6 @@ export function renderMenuRows(lcd, data, menuRowsFocusedIndex) {
         labelSpan.style.minWidth = textWidth + 'ch';
         labelSpan.style.maxWidth = textWidth + 'ch';
         labelSpan.style.textAlign = 'left';
-        labelSpan.style.fontWeight = 'bold';
         labelSpan.style.color = '#fff';
         labelSpan.style.padding = '0';
         labelSpan.style.margin = '0';
@@ -69,13 +66,11 @@ export function renderMenuRows(lcd, data, menuRowsFocusedIndex) {
         valueSpan.style.display = 'inline-block';
         valueSpan.style.background = '#fff';
         valueSpan.style.color = '#003366';
-        valueSpan.style.fontWeight = 'bold';
         valueSpan.style.borderRadius = '8px';
         valueSpan.style.width = valueBoxWidth + 'ch';
         valueSpan.style.minWidth = valueBoxWidth + 'ch';
         valueSpan.style.maxWidth = valueBoxWidth + 'ch';
         valueSpan.style.padding = '0';
-        valueSpan.style.fontWeight = data.styles?.fontWeight || 'bold';
         valueSpan.style.textAlign = 'center';
         valueSpan.style.boxShadow = (idx === menuRowsFocusedIndex) ? '0 2px 8px rgba(0,120,215,0.18)' : 'none';
         valueSpan.style.fontFamily = data.styles?.fontFamily || 'monospace';

@@ -27,10 +27,14 @@ The following table defines the link between the UI "Text Description" and the C
 | Protocol    | ui_item_prot   | PROTOCOL_TYPE    | enum        | 0 (Modbus RTU)  |
 | IP Address  | ui_item_ip     | IP_ADDR_0        | ipv4        | 192.168.0.1     |
 
+
 ### 4. Text-Based UI Description (JSON)
 This is the payload that the Phase 1 Simulator will ingest to render the page.
 
 See the file network_settings.json for the JSON payload used to render the Network Settings page.
+
+### 4a. Text Truncation Rule
+If the label or value text is too long for the available space, it will be truncated with an ellipsis (`...`). Word wrap is never used; all text is forced to a single line.
 
 ### 5. Interaction Model
 - **Focus State:** The "Focused" item (defined in JSON) must render with the Teal background color (#008080) to match the hardware's selection cursor.

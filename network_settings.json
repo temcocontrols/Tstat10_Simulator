@@ -1,5 +1,5 @@
 {
-  "page": "NETWORK_SETTINGS",
+  "page": "RS485_SETTINGS",
   "styles": {
     "bg": "#003366",
     "highlight": "#008080",
@@ -13,7 +13,7 @@
     "lcdTextColumns": 16,
     "labelColumnLayout": { "x": 20, "width": 120 },
     "valueColumnLayout": { "x": 160, "width": 160 },
-    "menuRowPixelHeight": 40,
+    "menuRowPixelHeight": 48,
     "headerLayout": { "x": 160, "y": 40, "align": "center", "font": "FONT_18_BOLD" },
     "footerLayout": { "x": 0, "y": 420, "width": 320, "height": 48 },
     "footerTopPadding": 6,
@@ -26,15 +26,18 @@
   },
   "widgets": [
     {
+      "type": "blank",
+      "lcdRow": 1
+    },
+    {
       "type": "header",
       "text": "RS485 Settings",
       "x": 160,
       "y": 40,
       "align": "center",
       "font": "FONT_18_BOLD",
-      "lcdRow": 1
+      "lcdRow": 2
     },
-    
     {
       "type": "menu_row",
       "id": "ui_item_prot",
@@ -42,22 +45,22 @@
       "register": 8,
       "options": ["MODBUS", "BACNET"],
       "value": "MODBUS",
-      "labelWidth": 120,
+      "labelWidth": 140,
       "valueX": 160,
-      "valueWidth": 112,
-      "lcdRow": 4
+      "valueWidth": 130,
+      "lcdRow": 3
     },
     {
       "type": "menu_row",
       "id": "ui_item_addr",
-      "label": "Network ID",
+      "label": "NetID",
       "register": 6,
       "is_focused": true,
       "value": 1,
-      "labelWidth": 120,
+      "labelWidth": 140,
       "valueX": 160,
-      "valueWidth": 84,
-      "lcdRow": 5
+      "valueWidth": 130,
+      "lcdRow": 4
     },
     {
       "type": "menu_row",
@@ -66,10 +69,10 @@
       "register": 7,
       "options": [9600, 19200, 38400, 115200],
       "value": 9600,
-      "labelWidth": 120,
+      "labelWidth": 140,
       "valueX": 160,
-      "valueWidth": 112,
-      "lcdRow": 6
+      "valueWidth": 130,
+      "lcdRow": 5
     },
     {
       "type": "button",

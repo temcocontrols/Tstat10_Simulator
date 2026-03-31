@@ -1,25 +1,36 @@
+/* Base styles for key containers to ensure consistent box model */
+.device-bezel, #tstat-lcd-container {
+    box-sizing: border-box;
+}
+
 #tstat-lcd-container {
-    width: var(--lcd-width); /* LCD visible area */
-    height: var(--lcd-height);
+    /* Visually compress LCD vertically, but only halfway compared to previous */
+    transform: scaleY(0.875);
+    top: 100px;
+    width: 320px; /* LCD visible area */
+    height: 324px;
     background: var(--lcd-background-color); /* Use lcd-background-color for LCD background */
     border-radius: var(--lcd-radius);
     overflow: visible; /* Allow outline to show outside LCD */
-    position: relative;
+    position: absolute;
+    top: 120px; /* Adjust this value to match your screenshot */
+    left: 0;
+    right: 0;
+    margin-left: auto;
+    margin-right: auto;
     z-index: 10;
-    margin-top: var(--lcd-padding-top); /* Use the LCD padding from the top variable */
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
+    padding: 0;
+    display: block;
+    box-sizing: border-box;
     font-family: 'Segoe UI', Arial, sans-serif;
 }
 
-#tstat-lcd-container::before {
+#tstat-lcd-container::before { /* This pseudo-element creates the glass lens effect */
     content: "";
     position: absolute;
     left: 50%;
-    top: calc(-1 * var(--lcd-padding-top) + var(--lcd-lens-y));
-    transform: translateX(-50%);
+    top: 0;
+    transform: translateX(-50%) translateY(0);
     width: var(--lcd-lens-width);
     height: var(--lcd-lens-height);
     border: var(--lcd-lens-thickness) solid rgba(255,255,255,0.18); /* Subtle lens effect */
@@ -29,7 +40,7 @@
     box-shadow: 0 2px 16px 0 rgba(255,255,255,0.12) inset;
 }
 
-#tstat-lcd-container::after {
+#tstat-lcd-container::after { /* This pseudo-element creates the dark inner bezel around the LCD */
     content: "";
     position: absolute;
     left: 50%;
@@ -51,7 +62,7 @@
     --lcd-padding-top: 40px;
     --button-gap: 17px;
     --button-bottom-space: 77.4px;
-    --compass-bottom-space: 240px;
+    --compass-bottom-space: calc(240px - var(--button-width) / 2);
     --compass-logo-x: 90px; /* Horizontal offset from right */
     --compass-logo-scale: 2; /* Scale factor for logo */
     --button-width: 97.52px;
@@ -63,7 +74,7 @@
     --lcd-lens-thickness: 6px; /* Standalone lens thickness */
     --lcd-lens-width: 550px;  /* Standalone lens width */
     --lcd-lens-height: 770px; /* Standalone lens height */
-    --lcd-lens-y: -50px; /* Vertical offset for lens positioning */
+    --lcd-lens-y: 0px; /* Vertical offset for lens positioning */
     --lcd-background-color: #3498db; /* LCD background color */
     --color2: #e67e22; /* Custom color 2 */
 }
@@ -110,18 +121,18 @@
 
 /* Tstat10 Hardware Case Styles */
 .device-bezel {
+    /* No debug border */
     width: var(--thermostat-width);
     height: var(--thermostat-height);
     background-color: var(--thermostat-bg);
     border-radius: var(--thermostat-radius);
-    padding-top: var(--thermostat-padding-top);
-    padding-bottom: var(--thermostat-padding-bottom);
+    padding-top: 0;
+    padding-bottom: 0;
     /* Shadow only to the right and below */
     box-shadow: var(--thermostat-shadow1), var(--thermostat-shadow2);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
+    /* Remove flex centering, use absolute centering for LCD */
     position: relative;
+    overflow: visible;
     z-index: 1;
 }
 

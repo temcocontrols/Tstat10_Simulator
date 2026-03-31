@@ -1,4 +1,4 @@
-// debug-panel.js: Update debug/status panel values from global state
+// debug-panel-fixed.js: Update debug/status panel values from global state
 // Can be reused on other simulator pages
 
 /**
@@ -22,14 +22,8 @@ export function updateDebugPanel(data) {
     if (keypadVal) keypadVal.textContent = debugObj.keypad;
     if (focusVal) focusVal.textContent = debugObj.focus;
     if (valueVal) valueVal.textContent = debugObj.value;
-    // Pipe debug data to local endpoint
-    try {
-        // fetch('http://localhost:5001/debug', {
-        //     method: 'POST',
-        //     headers: { 'Content-Type': 'application/json' },
-        //     body: JSON.stringify(debugObj)
-        // });
-    } catch (e) { /* ignore errors */ }
+    // Pipe debug data to local endpoint (DISABLED)
+    // No fetch call here!
     // Update status line if present
     const statusLine = document.getElementById('tstat-status-line');
     if (statusLine) {

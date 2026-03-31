@@ -7,9 +7,20 @@ export function setupDebugToggles(renderCallback) {
             const gridToggle = document.getElementById('toggle-grid-layer');
             const coordsToggle = document.getElementById('toggle-coords');
             if (gridToggle) {
+                // Respect current grid state, do not force ON
                 gridToggle.checked = !!window._tstatShowGridLayer;
+                if (window._tstatShowGridLayer) {
+                    document.body.classList.add('debug-active');
+                } else {
+                    document.body.classList.remove('debug-active');
+                }
                 gridToggle.addEventListener('change', (e) => {
                     window._tstatShowGridLayer = gridToggle.checked;
+                    if (gridToggle.checked) {
+                        document.body.classList.add('debug-active');
+                    } else {
+                        document.body.classList.remove('debug-active');
+                    }
                     renderCallback();
                 });
             }
