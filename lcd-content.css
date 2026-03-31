@@ -1,0 +1,23 @@
+/* lcd-content.css */
+/* All LCD display text, description, and behavior styles go here. */
+
+.lcd-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+}
+
+.lcd-content .temp-display {
+    font-size: 2em;
+    color: #ccc;
+    font-weight: bold;
+}
+
+.lcd-content .setpoint-display {
+    font-size: 1em;
+    color: #00796b;
+    margin-top: 4px;
+}
