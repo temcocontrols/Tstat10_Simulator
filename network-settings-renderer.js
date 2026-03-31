@@ -118,6 +118,12 @@ export async function renderNetworkSettings() {
     console.log('Menu row order:', menuRows.map(r => r.label));
     let menuRowsFocusedIndex = typeof window._networkSettingsFocus === 'number' ? window._networkSettingsFocus : 0;
     let menuRowCounter = 0;
+    const menuRowGap = data.layout?.menuRowGap || 0;
+    const rowHeight = data.layout?.rowHeight || 48;
+    const headerY = data.layout?.header?.y || 40;
+    const headerFontSize = parseInt((data.styles?.fontSize || '32px').replace('px','')) || 32;
+    const headerHeight = headerFontSize + 8; // 8px margin below header
+    const menuRowsTop = headerY + headerHeight;
     data.widgets.forEach((widget, idx) => {
         if (widget.type === 'header') {
             const header = document.createElement('div');
@@ -128,6 +134,7 @@ export async function renderNetworkSettings() {
             header.style.textAlign = widget.align || data.layout?.header?.align || 'center';
             header.style.fontWeight = widget.font || data.layout?.header?.font || 'bold';
             header.style.fontSize = data.styles?.fontSize || '22px';
+            header.style.whiteSpace = 'nowrap';
             header.innerHTML = widget.text.replace(/\n/g, '<br>');
             lcd.appendChild(header);
         } else if (widget.type === 'menu_row') {
@@ -135,17 +142,58 @@ export async function renderNetworkSettings() {
             let liveWidget = (window._networkSettingsData?.widgets || []).find(w => w.type === 'menu_row' && w.id === widget.id) || widget;
             const row = document.createElement('div');
             row.style.position = 'absolute';
-            row.style.left = (widget.x !== undefined ? widget.x : data.layout?.labelColumn?.x || 20) + 'px';
-            row.style.top = (widget.y !== undefined ? widget.y : (140 + menuRowCounter * (data.layout?.rowHeight || 48))) + 'px';
+            row.style.left = (data.layout?.rowLeftPadding || 0) + 'px';
+            // Add menuRowGap to the vertical position of each menu row
+            row.style.top = (menuRowsTop + menuRowCounter * (rowHeight + menuRowGap)) + 'px';
             row.style.display = 'flex';
             row.style.flexDirection = 'row';
             row.style.alignItems = 'center';
-            row.style.width = ((widget.labelWidth || data.layout?.labelColumn?.width || 120) + (widget.valueWidth || data.layout?.valueColumn?.width || 100)) + 'px';
-            row.style.height = (data.layout?.rowHeight || 48) + 'px';
-            row.style.background = (menuRowCounter === menuRowsFocusedIndex) ? (data.styles?.highlight || '#008080') : 'rgba(0,0,0,0.08)';
+            // Make row span the full canvas width minus left padding
+            const rowLeftPad = data.layout?.rowLeftPadding || 0;
+            const canvasW = data.layout?.canvas?.width || 320;
+            row.style.width = (canvasW - rowLeftPad) + 'px';
+            row.style.right = '';
+
+            // Render highlight background for every row, only visible for focused row
+            const highlight = document.createElement('div');
+            highlight.style.position = 'absolute';
+            highlight.style.left = '0';
+            highlight.style.top = '0';
+            highlight.style.width = '100%';
+            highlight.style.height = '100%';
+            highlight.style.background = data.styles?.highlight || '#008080';
+            highlight.style.borderRadius = '8px';
+            highlight.style.zIndex = '0';
+            highlight.style.pointerEvents = 'none';
+            highlight.style.opacity = (menuRowCounter === menuRowsFocusedIndex) ? '1' : '0';
+            row.style.position = 'relative';
+            row.insertBefore(highlight, row.firstChild);
+            // Ensure row contents are above highlight
+            // (do after highlight is inserted)
+            setTimeout(() => {
+                Array.from(row.children).forEach(child => {
+                    if (child !== highlight) {
+                        child.style.position = 'relative';
+                        child.style.zIndex = '1';
+                    }
+                });
+            }, 0);
+            row.style.height = (data.layout?.rowHeight || 40) + 'px';
+            // Default background for non-focused rows
+            if (menuRowCounter !== menuRowsFocusedIndex) {
+                row.style.background = 'rgba(0,0,0,0.08)';
+                row.style.boxShadow = '';
+            } else {
+                row.style.background = 'transparent';
+                row.style.boxShadow = '';
+            }
             row.style.borderRadius = '8px';
             row.style.fontSize = data.styles?.fontSize || '22px';
             row.style.fontFamily = data.styles?.fontFamily || 'monospace';
+            row.style.paddingTop = '0';
+            row.style.paddingBottom = '0';
+            row.style.marginTop = '0';
+            row.style.marginBottom = '0';
             // Label
             const labelSpan = document.createElement('span');
             labelSpan.textContent = widget.label;
@@ -154,46 +202,74 @@ export async function renderNetworkSettings() {
             labelSpan.style.textAlign = 'left';
             labelSpan.style.fontWeight = 'bold';
             labelSpan.style.color = '#fff';
+            labelSpan.style.padding = '0';
+            labelSpan.style.margin = '0';
             // Value
             const valueSpan = document.createElement('span');
             valueSpan.textContent = (liveWidget.value ?? liveWidget.options?.[0] ?? '').toString();
             valueSpan.style.display = 'inline-block';
+            valueSpan.style.padding = '0';
+            valueSpan.style.margin = '0';
             menuRowCounter++;
             valueSpan.style.background = '#fff';
             valueSpan.style.color = '#003366';
             valueSpan.style.fontWeight = 'bold';
             valueSpan.style.borderRadius = '8px';
             valueSpan.style.width = (widget.valueWidth || data.layout?.valueColumn?.width || 100) + 'px';
-            valueSpan.style.textAlign = 'center';
-            valueSpan.style.marginLeft = '12px';
+            valueSpan.style.marginLeft = 'auto';
+            valueSpan.style.textAlign = 'left';
+            valueSpan.style.paddingLeft = (data.layout?.valueBoxLeftPadding || 0) + 'px';
+            // Use marginRight for right padding outside the box
+            valueSpan.style.marginRight = (data.layout?.valueBoxRightPadding || 0) + 'px';
+            valueSpan.style.paddingRight = 0;
+            valueSpan.style.whiteSpace = 'nowrap';
+            valueSpan.style.overflow = 'hidden';
             row.appendChild(labelSpan);
             row.appendChild(valueSpan);
             lcd.appendChild(row);
-        } else if (widget.type === 'nav_footer') {
-            const footer = document.createElement('div');
-            footer.style.position = 'absolute';
-            footer.style.left = (widget.x !== undefined ? widget.x : data.layout?.footer?.x || 0) + 'px';
-            footer.style.top = (widget.y !== undefined ? widget.y : data.layout?.footer?.y || 420) + 'px';
-            footer.style.width = (widget.width || data.layout?.footer?.width || 320) + 'px';
-            footer.style.height = (widget.height || data.layout?.footer?.height || 48) + 'px';
-            footer.style.background = 'rgba(0,0,0,0.12)';
-            footer.style.display = 'flex';
-            footer.style.flexDirection = 'row';
-            footer.style.alignItems = 'center';
-            footer.style.justifyContent = 'space-between';
-            footer.style.fontSize = '20px';
-            footer.style.fontFamily = data.styles?.fontFamily || 'monospace';
-            footer.style.color = '#fff';
-            footer.style.borderRadius = '8px';
-            footer.style.padding = '0 24px';
-            // Add SVG arrows under UP and DOWN, and to the left of BACK and right of NEXT
-            const arrowUp = `<svg width="18" height="12" style="display:block;margin:0 auto;" viewBox="0 0 18 12"><polygon points="9,2 2,10 16,10" fill="#fff"/></svg>`;
-            const arrowDown = `<svg width="18" height="12" style="display:block;margin:0 auto;" viewBox="0 0 18 12"><polygon points="2,2 16,2 9,10" fill="#fff"/></svg>`;
-            const arrowLeft = `<svg width="14" height="18" style="vertical-align:middle;margin-right:4px;" viewBox="0 0 14 18"><polygon points="12,2 4,9 12,16" fill="#fff"/></svg>`;
-            const arrowRight = `<svg width="14" height="18" style="vertical-align:middle;margin-left:4px;" viewBox="0 0 14 18"><polygon points="2,2 10,9 2,16" fill="#fff"/></svg>`;
-            footer.innerHTML = `<span>${arrowLeft}${widget.left}</span><span>${widget.up}<br>${arrowUp}</span><span>${widget.down}<br>${arrowDown}</span><span>${widget.right}${arrowRight}</span>`;
-            lcd.appendChild(footer);
         }
+    });
+
+    // Render all button widgets from JSON
+    const buttonWidgets = data.widgets.filter(w => w.type === 'button');
+    const footerPadding = data.layout?.footerPadding || 0;
+    // Center the button row horizontally with gap
+    const canvasWidth = data.layout?.canvas?.width || 320;
+    const buttonGap = data.layout?.buttonGap || 0;
+    const buttonWidths = buttonWidgets.map(w => w.width !== undefined ? w.width : 72);
+    const totalButtonWidth = buttonWidths.reduce((a, b) => a + b, 0) + buttonGap * (buttonWidgets.length - 1);
+    const startX = Math.round((canvasWidth - totalButtonWidth) / 2);
+    let runningX = startX;
+    buttonWidgets.forEach((widget, idx) => {
+        const btn = document.createElement('div');
+        btn.textContent = widget.label;
+        btn.style.position = 'absolute';
+        btn.style.left = runningX + 'px';
+        let y = (widget.y !== undefined ? widget.y : (data.layout?.footer?.y || 435));
+        btn.style.top = (y - footerPadding) + 'px';
+        const btnWidth = widget.width !== undefined ? widget.width : 72;
+        btn.style.width = btnWidth + 'px';
+        btn.style.height = (widget.height !== undefined ? widget.height : 45) + 'px';
+        btn.style.background = data.styles?.bg || '#003366';
+        btn.style.color = '#fff';
+        btn.style.fontWeight = 'bold';
+        btn.style.fontFamily = data.styles?.fontFamily || 'monospace';
+        btn.style.display = 'flex';
+        btn.style.alignItems = 'center';
+        btn.style.justifyContent = 'center';
+        btn.style.lineHeight = '1.1';
+        btn.style.borderRadius = '8px';
+        btn.style.textAlign = 'center';
+        btn.style.boxShadow = '0 2px 8px rgba(0,0,0,0.10)';
+        btn.style.userSelect = 'none';
+        btn.style.border = '2px solid #fff';
+        if (widget.font) {
+            btn.style.font = widget.font;
+        } else {
+            btn.style.fontSize = '20px';
+        }
+        lcd.appendChild(btn);
+        runningX += btnWidth + buttonGap;
     });
 }
 

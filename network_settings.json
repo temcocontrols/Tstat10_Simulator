@@ -4,76 +4,116 @@
     "bg": "#003366",
     "highlight": "#008080",
     "fontFamily": "'Fira Mono', 'Consolas', 'Menlo', 'Monaco', 'Liberation Mono', 'Courier New', monospace",
-    "fontWeight": "900"
+    "fontWeight": "900",
+    "fontSize": "32px"
   },
   "layout": {
-    "canvas": { "width": 320, "height": 480 },
-    "rows": 3,
-    "columns": 2,
-    "labelColumn": { "x": 20, "width": 120 },
-    "valueColumn": { "x": 160, "width": 100 },
-    "rowHeight": 48,
-    "header": { "x": 160, "y": 40, "align": "center", "font": "FONT_18_BOLD" },
-    "footer": { "x": 0, "y": 420, "width": 320, "height": 48 }
+    "lcdCanvas": { "width": 320, "height": 480 },
+    "lcdTextRows": 10,
+    "lcdTextColumns": 16,
+    "labelColumnLayout": { "x": 20, "width": 120 },
+    "valueColumnLayout": { "x": 160, "width": 160 },
+    "menuRowPixelHeight": 40,
+    "headerLayout": { "x": 160, "y": 40, "align": "center", "font": "FONT_18_BOLD" },
+    "footerLayout": { "x": 0, "y": 420, "width": 320, "height": 48 },
+    "footerTopPadding": 6,
+    "buttonHorizontalGap": 6,
+    "menuRowVerticalGap": 4,
+    "valueBoxRightPadding": 20,
+    "valueBoxLeftPadding": 12,
+    "valueBoxTextAlign": "right",
+    "menuRowLeftPadding": 20
   },
   "widgets": [
     {
       "type": "header",
-      "text": "C2mmunications",
+      "text": "RS485 Settings",
       "x": 160,
       "y": 40,
       "align": "center",
-      "font": "FONT_18_BOLD"
+      "font": "FONT_18_BOLD",
+      "lcdRow": 1
+    },
+    
+    {
+      "type": "menu_row",
+      "id": "ui_item_prot",
+      "label": "Protocol",
+      "register": 8,
+      "options": ["MODBUS", "BACNET"],
+      "value": "MODBUS",
+      "labelWidth": 120,
+      "valueX": 160,
+      "valueWidth": 112,
+      "lcdRow": 4
     },
     {
       "type": "menu_row",
       "id": "ui_item_addr",
-      "label": "Modbus ID",
+      "label": "Network ID",
       "register": 6,
       "is_focused": true,
       "value": 1,
-      "x": 20,
-      "y": 140,
       "labelWidth": 120,
       "valueX": 160,
-      "valueWidth": 100
+      "valueWidth": 84,
+      "lcdRow": 5
     },
     {
       "type": "menu_row",
       "id": "ui_item_baud",
-      "label": "Baudrate",
+      "label": "Baud",
       "register": 7,
       "options": [9600, 19200, 38400, 115200],
       "value": 9600,
-      "x": 20,
-      "y": 188,
       "labelWidth": 120,
       "valueX": 160,
-      "valueWidth": 100
+      "valueWidth": 112,
+      "lcdRow": 6
     },
     {
-      "type": "menu_row",
-      "id": "ui_item_prot",
-      "label": "Mode",
-      "register": 8,
-      "options": ["MODBUS", "BACNET"],
-      "value": "MODBUS",
-      "x": 20,
-      "y": 236,
-      "labelWidth": 120,
-      "valueX": 160,
-      "valueWidth": 100
-    },
-    {
-      "type": "nav_footer",
-      "left": "BACK",
-      "right": "NEXT",
-      "up": "DOWN",
-      "down": "UP",
+      "type": "button",
+      "id": "btn_back",
+      "label": "BACK",
       "x": 0,
-      "y": 420,
-      "width": 260,
-      "height": 36
+      "y": 435,
+      "width": 92,
+      "height": 45,
+      "font": "32px 'Fira Mono', 'Consolas', 'Menlo', 'Monaco', 'Liberation Mono', 'Courier New', monospace",
+      "lcdRow": 9
+    },
+    {
+      "type": "button",
+      "id": "btn_down",
+      "label": "▼",
+      "x": 0,
+      "y": 435,
+      "width": 48,
+      "height": 45,
+      "font": "38px 'Fira Mono', 'Consolas', 'Menlo', 'Monaco', 'Liberation Mono', 'Courier New', monospace",
+      "lcdRow": 9
+    },
+    {
+      "type": "button",
+      "id": "btn_up",
+      "label": "▲",
+      "x": 0,
+      "y": 435,
+      "width": 48,
+      "height": 45,
+      "font": "38px 'Fira Mono', 'Consolas', 'Menlo', 'Monaco', 'Liberation Mono', 'Courier New', monospace",
+      "lcdRow": 9
+    },
+    {
+      "type": "button",
+      "id": "btn_next",
+      "label": "NEXT",
+      "x": 0,
+      "y": 435,
+      "width": 92,
+      "height": 45,
+      "font": "32px 'Fira Mono', 'Consolas', 'Menlo', 'Monaco', 'Liberation Mono', 'Courier New', monospace",
+      "lcdRow": 9
     }
   ]
 }

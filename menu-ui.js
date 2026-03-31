@@ -89,31 +89,57 @@ export function renderMenuRows(lcd, data, menuRowsFocusedIndex) {
 
 // Render the arrow key row at the bottom
 export function renderArrowRow(lcd, data) {
-    const arrowRow = document.createElement('div');
-    arrowRow.style.position = 'absolute';
-    arrowRow.style.left = '0';
-    arrowRow.style.bottom = '0';
-    arrowRow.style.height = '1em';
-    arrowRow.style.width = '100%';
-    arrowRow.style.fontSize = '28px';
-    arrowRow.style.lineHeight = '1em';
-    arrowRow.style.fontFamily = data.styles?.fontFamily || 'monospace';
-    arrowRow.style.pointerEvents = 'none';
-    const arrowPositions = [2, 6, 10, 16];
-    const arrows = [
-        { id: 'arrow-left',  char: '◀',  style: 'font-weight: normal;' },
-        { id: 'arrow-down',  char: '▼',  style: 'font-weight: bold; font-size: 36px; line-height: 1;' },
-        { id: 'arrow-up',    char: '▲',  style: 'font-weight: bold; font-size: 36px; line-height: 1;' },
-        { id: 'arrow-right', char: '▶',  style: 'font-weight: normal;' }
-    ];
-    let arrowHtml = '';
-    for (let i = 0; i < arrows.length; i++) {
-        let left = arrowPositions[i];
-        if (i === 1) left -= 0.5;
-        arrowHtml += `<span id="${arrows[i].id}" style="position: absolute; left: ${left}ch; bottom: 0.15em; padding-bottom: 0.1em; ${arrows[i].style} pointer-events: none;">${arrows[i].char}</span>`;
-    }
-    arrowRow.innerHTML = arrowHtml;
-    lcd.appendChild(arrowRow);
+    // Use the same font family and size as the main text
+    const fontFamily = data.styles?.fontFamily || 'monospace';
+    const fontSize = data.styles?.fontSize || '32px';
+
+    // Only show the arrow row at the bottom
+    const arrowsRow = document.createElement('div');
+    arrowsRow.style.display = 'flex';
+    arrowsRow.style.flexDirection = 'row';
+    arrowsRow.style.justifyContent = 'space-between';
+    arrowsRow.style.alignItems = 'center';
+    arrowsRow.style.width = '100%';
+    arrowsRow.style.fontFamily = fontFamily;
+    arrowsRow.style.fontSize = fontSize;
+    arrowsRow.style.fontWeight = data.styles?.fontWeight || 'bold';
+    arrowsRow.style.background = 'transparent';
+    arrowsRow.style.lineHeight = '1.1';
+    arrowsRow.style.position = 'absolute';
+    arrowsRow.style.left = '0';
+    arrowsRow.style.bottom = '0';
+    arrowsRow.style.pointerEvents = 'none';
+
+    const leftArrow = document.createElement('span');
+    leftArrow.textContent = '◀';
+    leftArrow.style.flex = '1';
+    leftArrow.style.textAlign = 'left';
+    leftArrow.style.color = '#fff';
+
+    const downArrow = document.createElement('span');
+    downArrow.textContent = '▼';
+    downArrow.style.flex = '1';
+    downArrow.style.textAlign = 'center';
+    downArrow.style.color = '#fff';
+
+    const upArrow = document.createElement('span');
+    upArrow.textContent = '▲';
+    upArrow.style.flex = '1';
+    upArrow.style.textAlign = 'center';
+    upArrow.style.color = '#fff';
+
+    const rightArrow = document.createElement('span');
+    rightArrow.textContent = '▶';
+    rightArrow.style.flex = '1';
+    rightArrow.style.textAlign = 'right';
+    rightArrow.style.color = '#fff';
+
+    arrowsRow.appendChild(leftArrow);
+    arrowsRow.appendChild(downArrow);
+    arrowsRow.appendChild(upArrow);
+    arrowsRow.appendChild(rightArrow);
+
+    lcd.appendChild(arrowsRow);
 }
 
 // Render a dead (blank) row after the arrow row
