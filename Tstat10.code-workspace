@@ -7,5 +7,7 @@
 			"path": "../T3-programmable-controller-on-ESP32"
 		}
 	],
-	"settings": {}
+	"settings": {
+		"powershell.cwd": "Tstat10_Simulator"
+	}
 }
