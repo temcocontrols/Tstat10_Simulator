@@ -1,0 +1,79 @@
+{
+  "page": "NETWORK_SETTINGS",
+  "styles": {
+    "bg": "#003366",
+    "highlight": "#008080",
+    "fontFamily": "'Fira Mono', 'Consolas', 'Menlo', 'Monaco', 'Liberation Mono', 'Courier New', monospace",
+    "fontWeight": "900"
+  },
+  "layout": {
+    "canvas": { "width": 320, "height": 480 },
+    "rows": 3,
+    "columns": 2,
+    "labelColumn": { "x": 20, "width": 120 },
+    "valueColumn": { "x": 160, "width": 100 },
+    "rowHeight": 48,
+    "header": { "x": 160, "y": 40, "align": "center", "font": "FONT_18_BOLD" },
+    "footer": { "x": 0, "y": 420, "width": 320, "height": 48 }
+  },
+  "widgets": [
+    {
+      "type": "header",
+      "text": "C2mmunications",
+      "x": 160,
+      "y": 40,
+      "align": "center",
+      "font": "FONT_18_BOLD"
+    },
+    {
+      "type": "menu_row",
+      "id": "ui_item_addr",
+      "label": "Modbus ID",
+      "register": 6,
+      "is_focused": true,
+      "value": 1,
+      "x": 20,
+      "y": 140,
+      "labelWidth": 120,
+      "valueX": 160,
+      "valueWidth": 100
+    },
+    {
+      "type": "menu_row",
+      "id": "ui_item_baud",
+      "label": "Baudrate",
+      "register": 7,
+      "options": [9600, 19200, 38400, 115200],
+      "value": 9600,
+      "x": 20,
+      "y": 188,
+      "labelWidth": 120,
+      "valueX": 160,
+      "valueWidth": 100
+    },
+    {
+      "type": "menu_row",
+      "id": "ui_item_prot",
+      "label": "Mode",
+      "register": 8,
+      "options": ["MODBUS", "BACNET"],
+      "value": "MODBUS",
+      "x": 20,
+      "y": 236,
+      "labelWidth": 120,
+      "valueX": 160,
+      "valueWidth": 100
+    },
+    {
+      "type": "nav_footer",
+      "left": "BACK",
+      "right": "NEXT",
+      "up": "DOWN",
+      "down": "UP",
+      "x": 0,
+      "y": 420,
+      "width": 260,
+      "height": 36
+    }
+  ]
+}
