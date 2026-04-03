@@ -1,0 +1,63 @@
+{
+  "page": "MAIN_DISPLAY",
+  "styles": {
+    "bg": "#003366",
+    "fontFamily": "'Fira Mono', 'Consolas', 'Menlo', 'Monaco', 'Liberation Mono', 'Courier New', monospace",
+    "fontWeight": "900"
+  },
+  "layout": {
+    "lcdCanvas": { "width": 320, "height": 480 }
+  },
+  "widgets": [
+    {
+      "type": "label",
+      "id": "temp_label",
+      "text": "ROOM TEMP",
+      "x": 160,
+      "y": 80,
+      "align": "center",
+      "font": "28px 'Fira Mono', monospace",
+      "color": "#aaddff"
+    },
+    {
+      "type": "label",
+      "id": "temp_val",
+      "text": "23.3°C",
+      "x": 160,
+      "y": 120,
+      "align": "center",
+      "font": "72px 'Fira Mono', monospace",
+      "color": "#ffffff"
+    },
+    {
+      "type": "label",
+      "id": "stp_label",
+      "text": "SETPOINT",
+      "x": 160,
+      "y": 240,
+      "align": "center",
+      "font": "28px 'Fira Mono', monospace",
+      "color": "#aaddff"
+    },
+    {
+      "type": "label",
+      "id": "stp_val",
+      "text": "15.5°C",
+      "x": 160,
+      "y": 280,
+      "align": "center",
+      "font": "48px 'Fira Mono', monospace",
+      "color": "#ffffff"
+    },
+    {
+      "type": "button",
+      "id": "btn_settings",
+      "label": "SETTINGS",
+      "x": 114,
+      "y": 435,
+      "width": 92,
+      "height": 45,
+      "font": "24px 'Fira Mono', monospace"
+    }
+  ]
+}

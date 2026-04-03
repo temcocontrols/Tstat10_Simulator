@@ -1,0 +1,16 @@
+[
+  { "name": "leftup", "width": 8, "height": 8 },
+  { "name": "leftdown", "width": 8, "height": 8 },
+  { "name": "rightdown", "width": 8, "height": 8 },
+  { "name": "rightup", "width": 8, "height": 8 },
+  { "name": "cmnct_send", "width": 13, "height": 26 },
+  { "name": "cmnct_rcv", "width": 13, "height": 26 },
+  { "name": "wifi_4", "width": 26, "height": 26 },
+  { "name": "wifi_3", "width": 26, "height": 26 },
+  { "name": "wifi_2", "width": 26, "height": 26 },
+  { "name": "wifi_1", "width": 26, "height": 26 },
+  { "name": "wifi_0", "width": 26, "height": 26 },
+  { "name": "wifi_none", "width": 26, "height": 26 },
+  { "name": "athome", "width": 57, "height": 27 },
+  { "name": "offhome", "width": 57, "height": 27 }
+]

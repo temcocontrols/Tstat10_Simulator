@@ -10,8 +10,8 @@ export function updateDebugPanel(data) {
     const keypadVal = document.getElementById('debug-keypad-value');
     const focusVal = document.getElementById('debug-focus-value');
     const valueVal = document.getElementById('debug-value-value');
-    const menuRows = data?.widgets?.filter(w => w.type === 'menu_row') || [];
-    const focusIdx = window._networkSettingsFocus || 0;
+    const menuRows = (data?.widgets || []).filter(w => w.type === 'menu_row');
+    const focusIdx = window._currentScreenFocus || 0;
     const debugObj = {
         event: window._tstatLastEvent || '',
         keypad: window._tstatLastKeypad || '',

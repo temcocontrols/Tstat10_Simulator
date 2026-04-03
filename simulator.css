@@ -25,7 +25,10 @@
     font-family: 'Segoe UI', Arial, sans-serif;
 }
 
-#tstat-lcd-container::before { /* This pseudo-element creates the glass lens effect */
+/* Remove the lens from the LCD container */
+
+/* Add the lens to the device bezel, starting at the very top */
+.device-bezel::after {
     content: "";
     position: absolute;
     left: 50%;
@@ -33,26 +36,13 @@
     transform: translateX(-50%) translateY(0);
     width: var(--lcd-lens-width);
     height: var(--lcd-lens-height);
-    border: var(--lcd-lens-thickness) solid rgba(255,255,255,0.18); /* Subtle lens effect */
+    border: var(--lcd-lens-thickness) solid red; /* DEBUG: red lens outline */
     border-radius: var(--lcd-radius);
     pointer-events: none;
     z-index: 13;
     box-shadow: 0 2px 16px 0 rgba(255,255,255,0.12) inset;
 }
 
-#tstat-lcd-container::after { /* This pseudo-element creates the dark inner bezel around the LCD */
-    content: "";
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
-    width: calc(100% + 2 * var(--lcd-bezel-thickness));
-    height: calc(100% + 2 * var(--lcd-bezel-thickness));
-    border: var(--lcd-bezel-thickness) solid var(--lcd-bezel-color); /* Bezel color as parameter */
-    border-radius: var(--lcd-radius);
-    pointer-events: none;
-    z-index: 12;
-}
 :root {
     /* Sizing and spacing variables (DO NOT CHANGE unless directed) */
     --thermostat-width: 660px;
@@ -72,8 +62,8 @@
     --lcd-bezel-thickness: calc(var(--lcd-width) * 0.015); /* Bezel thickness = 1.5% of LCD width */
     --lcd-bezel-color: #888; /* Bezel color as parameter */
     --lcd-lens-thickness: 6px; /* Standalone lens thickness */
-    --lcd-lens-width: 550px;  /* Standalone lens width */
-    --lcd-lens-height: 770px; /* Standalone lens height */
+    --lcd-lens-width: 432px;  /* Lens width: 50% wider */
+    --lcd-lens-height: 520px; /* Lens height: increased by 30% */
     --lcd-lens-y: 0px; /* Vertical offset for lens positioning */
     --lcd-background-color: #3498db; /* LCD background color */
     --color2: #e67e22; /* Custom color 2 */
@@ -136,6 +126,20 @@
     z-index: 1;
 }
 
+    .device-bezel::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 0;
+        transform: translateX(-50%);
+        width: 475px; /* 432px * 1.1 */
+        height: 484px; /* 440px * 1.1 */
+        border-radius: 36px;
+        border: 2px solid red;
+        background: rgba(255,0,0,0.05);
+        z-index: 2;
+        pointer-events: none;
+    }
 /* Simulate top edge thickness */
 .device-bezel::before {
     content: "";

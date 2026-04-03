@@ -8,23 +8,26 @@ The LCD menu system provides user interaction for temperature control, setpoint 
 ## Main Display
 - **Temperature Display:** Shows the current room temperature.
 - **Setpoint Display:** Shows the current setpoint temperature.
+- **Mode Icons:** Displays icons for occupied, heat/cool, fan, and day/night modes.
 - **Navigation Buttons:**
   - UP/DOWN: Adjust setpoint or navigate menu items
   - LEFT/RIGHT: Change menu context or return to previous/next screen
 
 ## Menu Structure
-- **Home Screen**
-  - Shows temperature and setpoint
+- **Home Screen (Main Menu)**
+  - Shows temperature, setpoint, and modes.
   - Button actions: UP/DOWN to adjust setpoint
-- **Settings Menu**
-  - Accessed by holding RIGHT button for 2 seconds
-  - Menu items:
-    - Set Time
-    - Set Schedule
-    - System Info
-    - Exit
+- **Setup Menu**
+  - Accessed by long-pressing the LEFT and RIGHT keypad buttons at the same time, or by pressing the 'S' key on the keypad.
+  - Contains about 5 items, leading to various configuration pages:
+    - Ethernet Setup
+    - Clock
+    - Outside Air Temp
+    - RS485 Settings
+    - To Be Done
 - **Submenus**
   - Each menu item leads to a dedicated screen for configuration or information
+  - Use the BACK button to navigate backwards through these submenus to the main Setup Menu.
 
 ## Navigation Logic
 - Use arrow keys to move between menu items

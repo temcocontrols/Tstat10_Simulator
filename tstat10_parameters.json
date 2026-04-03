@@ -1,0 +1,70 @@
+[
+  {
+    "label": "Protocol",
+    "id": "ui_item_prot",
+    "register": 8,
+    "type": "enum",
+    "options": ["MODBUS", "BACNET"],
+    "default": "MODBUS",
+    "notes": "Communication protocol selection."
+  },
+  {
+    "label": "NetID",
+    "id": "ui_item_addr",
+    "register": 6,
+    "type": "uint8_t",
+    "default": 1,
+    "notes": "Modbus/BACnet device address."
+  },
+  {
+    "label": "Baud",
+    "id": "ui_item_baud",
+    "register": 7,
+    "type": "uint32_t",
+    "options": [9600, 19200, 38400, 115200],
+    "default": 115200,
+    "notes": "Serial communication baud rate."
+  },
+  {
+    "label": "Setpoint",
+    "id": "stp_val",
+    "register": "-",
+    "type": "float",
+    "default": "-",
+    "notes": "Temperature setpoint."
+  },
+  {
+    "label": "Mode",
+    "id": "mode_val",
+    "register": "-",
+    "type": "enum",
+    "options": ["OFF", "HEAT", "COOL", "AUTO"],
+    "default": "-",
+    "notes": "System mode."
+  },
+  {
+    "label": "Fan Speed",
+    "id": "fan_val",
+    "register": "-",
+    "type": "enum",
+    "options": ["AUTO", "LOW", "MED", "HIGH"],
+    "default": "-",
+    "notes": "Fan speed."
+  },
+  {
+    "label": "Temperature",
+    "id": "temp_val",
+    "register": "-",
+    "type": "float",
+    "default": "-",
+    "notes": "Current room temperature."
+  },
+  {
+    "label": "Humidity",
+    "id": "hum_val",
+    "register": "-",
+    "type": "float",
+    "default": "-",
+    "notes": "Current room humidity."
+  }
+]

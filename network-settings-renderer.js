@@ -24,14 +24,104 @@ import { renderMenuHeader, renderMenuRows, renderArrowRow, renderDeadRow } from 
 import { setupDebugToggles } from './debug-toggles.js';
 import { updateDebugPanel } from './debug-panel-fixed.js';
 
-export async function renderNetworkSettings() {
+
+// Central navigation function
+window.navigateTo = function(screenName) {
+    const screenMap = {
+        'main': './main_display.json',
+        'setup': './setup_menu.json',
+        'settings': './network_settings.json',
+        'ethernet': './ethernet_setup.json',
+        'clock': './clock_setup.json',
+        'oat': './oat_setup.json',
+        'tbd': './tbd_setup.json'
+    };
+    const jsonPath = screenMap[screenName];
+    if (jsonPath) {
+        // Reset focus when changing screens
+        window._currentScreenFocus = 0;
+        renderScreen(jsonPath);
+    } else {
+        console.error(`[Navigate] Unknown screen: ${screenName}`);
+    }
+}
+
+export async function renderScreen(jsonPath) {
     // Prepare LCD container
     const lcdGrid = document.getElementById('tstat-lcd-container');
     if (!lcdGrid) return;
+
+    // Inject VS Code styling for debug tools and context menus to make them larger and monospaced
+    if (!document.getElementById('vscode-debug-styles')) {
+        const style = document.createElement('style');
+        style.id = 'vscode-debug-styles';
+        style.innerHTML = `
+            /* Force the entire debug UI shell to use VS Code monospaced fonts */
+            body {
+                font-family: 'Consolas', 'Fira Mono', 'Menlo', 'Courier New', monospace !important;
+                font-size: 14px;
+            }
+            
+            /* VS Code style for visual edit context menus */
+            #visual-edit-context-menu {
+                font-family: inherit !important;
+                font-size: 14px !important;
+                min-width: 180px;
+                padding: 8px !important;
+            }
+            #visual-edit-context-menu button {
+                font-family: inherit !important;
+                font-size: 14px !important;
+                padding: 6px 12px !important;
+                margin: 4px 2px !important;
+                cursor: pointer;
+                background: #f3f3f3;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+            }
+            #visual-edit-context-menu button:hover {
+                background: #e5e5e5;
+            }
+            
+            /* Target specific debug elements to ensure legibility */
+            [id*="debug-"], [id*="toggle"], #tstat-status-line {
+                font-size: 14px !important;
+            }
+            #btn-lock-save {
+                font-size: 15px !important;
+                padding: 10px !important;
+                border-radius: 6px;
+            }
+        `;
+        document.head.appendChild(style);
+    }
     // Remove any previous grid overlay
     const prevGrid = lcdGrid.querySelector('.debug-grid');
     if (prevGrid) prevGrid.remove();
     // Do NOT clear lcdGrid.innerHTML here—main UI will be rendered below
+
+    // --- Draw lens outline (light grey rounded rectangle) ---
+    // Remove previous lens if present
+    const prevLens = lcdGrid.querySelector('.tstat-lens-outline');
+    if (prevLens) prevLens.remove();
+    const lens = document.createElement('div');
+    lens.className = 'tstat-lens-outline';
+    lens.style.position = 'absolute';
+    // Centered: 16px margin on each side (288px wide on 320px canvas)
+    // Make lens 50% wider and centered
+    const lensWidth = 288 * 1.5; // 432px
+    lens.style.left = `${(320 - lensWidth) / 2}px`;
+    lens.style.top = '0px';
+        lens.style.width = '475px'; // 432px * 1.1
+        lens.style.height = '484px'; // 440px * 1.1
+    lens.style.borderRadius = '32px';
+    lens.style.border = '3px solid red';
+    lens.style.background = 'rgba(255,0,0,0.05)'; // subtle red tint for debugging
+    lens.style.boxSizing = 'border-box';
+    lens.style.pointerEvents = 'none';
+    lens.style.zIndex = '10';
+    // Insert as first child so all UI renders above it
+    lcdGrid.insertBefore(lens, lcdGrid.firstChild);
         // ...existing code...
         // After main UI is rendered, add grid overlay if enabled
         setTimeout(() => {
@@ -89,7 +179,7 @@ export async function renderNetworkSettings() {
         }, 0);
     // Show LCD redbox coordinates in debug panel if present
     setTimeout(() => {
-        updateRedboxDebugPanel();
+        if (typeof updateRedboxDebugPanel === 'function') updateRedboxDebugPanel();
     }, 0);
     // Redbox debug flag: always sync with checkbox state if present
     const redboxToggle = document.getElementById('toggle-redbox');
@@ -97,7 +187,7 @@ export async function renderNetworkSettings() {
         if (!redboxToggle._redboxListenerAttached) {
             redboxToggle.addEventListener('change', (e) => {
                 window._tstatShowRedbox = redboxToggle.checked;
-                renderNetworkSettings();
+                renderScreen(jsonPath);
             });
             redboxToggle._redboxListenerAttached = true;
         }
@@ -107,12 +197,16 @@ export async function renderNetworkSettings() {
     }
     // Update debug event panel if present using reusable routine
     setTimeout(() => {
-        updateDebugPanel(window._networkSettingsData);
+        if (typeof updateDebugPanel === 'function') updateDebugPanel(window._currentScreenData);
     }, 0);
 
     const lcd = document.getElementById('tstat-lcd-container');
     if (!lcd) return;
-    lcd.innerHTML = '';
+
+    // Clear old UI elements, but preserve the lens and grid we just set up
+    Array.from(lcd.children).forEach(child => {
+        if (!child.classList.contains('tstat-lens-outline') && !child.classList.contains('debug-grid')) child.remove();
+    });
 
     // Debug layer flags (global for toggling) - allow toggles to control overlays
     if (typeof window._tstatShowGridLayer === 'undefined') {
@@ -122,7 +216,7 @@ export async function renderNetworkSettings() {
     window._tstatShowCoordsLayer = window._tstatShowCoordsLayer ?? false;
 
     // Attach debug layer toggle listeners (grid, coords) using reusable routine
-    setupDebugToggles(renderNetworkSettings);
+    setupDebugToggles(() => renderScreen(jsonPath));
     // Sync grid toggle button state after refresh
     const gridToggle = document.getElementById('toggle-grid-layer');
     if (gridToggle) {
@@ -159,19 +253,30 @@ export async function renderNetworkSettings() {
             document.body.appendChild(btnWrapper);
         }
 
-        lockBtn.addEventListener('click', () => {
+        lockBtn.addEventListener('click', async () => {
             window._isVisualEditMode = !window._isVisualEditMode;
-            if (!window._isVisualEditMode) {
-                // Trigger file download to "write" changes locally
-                const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(window._networkSettingsData, null, 2));
-                const downloadAnchorNode = document.createElement('a');
-                downloadAnchorNode.setAttribute("href", dataStr);
-                downloadAnchorNode.setAttribute("download", "network_settings.json");
-                document.body.appendChild(downloadAnchorNode);
-                downloadAnchorNode.click();
-                downloadAnchorNode.remove();
+            if (!window._isVisualEditMode && window._currentScreenData.page !== 'MAIN_DISPLAY') {
+                const jsonString = JSON.stringify(window._currentScreenData, null, 2);
+                // 1. Silent Save for T3000 Desktop Host
+                if (window.chrome && window.chrome.webview) {
+                    window.chrome.webview.postMessage({ action: 'save_settings', data: window._currentScreenData });
+                } else {
+                    // 2. Silent Save via local Node.js endpoint (no file prompts!)
+                    const targetFile = jsonPath.split('/').pop();
+                    fetch(`http://localhost:5001/save_settings?file=${targetFile}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: jsonString
+                    }).catch(() => {
+                        // 3. Fallback to silent browser cache if local server isn't running
+                        localStorage.setItem(`tstat_cache_${jsonPath}`, jsonString);
+                        console.warn('[Visual Edit] Local save server not found on port 5001. Saved to browser cache.');
+                    });
+                }
+            } else if (!window._isVisualEditMode) {
+                console.warn('[Visual Edit] Saving is disabled for the main screen.');
             }
-            renderNetworkSettings();
+            renderScreen(jsonPath);
         });
     }
 
@@ -189,18 +294,28 @@ export async function renderNetworkSettings() {
     }
 
     // Only fetch JSON and set window._networkSettingsData if not already set (preserve user changes)
+    window._currentJsonPath = jsonPath;
     let data;
-    if (!window._networkSettingsData) {
+    // Check if we already have the data loaded for this specific screen
+    if (!window._currentScreenData || window._lastLoadedJsonPath !== jsonPath) {
         try {
-            const resp = await fetch('./network_settings.json?_=' + Date.now());
-            data = await resp.json();
-            window._networkSettingsData = data;
+            const cachedData = localStorage.getItem(`tstat_cache_${jsonPath}`);
+            if (cachedData) {
+                data = JSON.parse(cachedData);
+                console.log(`[Visual Edit] Loaded layout for ${jsonPath} from silent cache.`);
+            } else {
+                const resp = await fetch(jsonPath + '?_=' + Date.now());
+                data = await resp.json();
+            }
+            window._currentScreenData = data;
+            window._lastLoadedJsonPath = jsonPath;
         } catch (e) {
-            lcd.innerHTML = '<div style="color:red">Failed to load network_settings.json</div>';
+            lcd.innerHTML = `<div style="color:red; padding: 20px;">Failed to load ${jsonPath}</div>`;
+            console.error(e);
             return;
         }
     }
-    data = window._networkSettingsData;
+    data = window._currentScreenData;
 
     lcd.style.background = data.styles?.bg || '#003366';
     lcd.style.color = '#fff';
@@ -210,13 +325,110 @@ export async function renderNetworkSettings() {
     lcd.style.width = (data.layout?.canvas?.width || 320) + 'px';
     lcd.style.height = (data.layout?.canvas?.height || 480) + 'px';
 
+    // Allow dropping elements onto empty grid spaces
+    if (!lcd._dragEventsAttached) {
+        lcd.addEventListener('dragover', (e) => {
+            if (window._isVisualEditMode) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+            }
+        });
+        lcd.addEventListener('drop', (e) => {
+            if (!window._isVisualEditMode || !window._draggedWidget || data.page === 'MAIN_DISPLAY') return;
+            e.preventDefault();
+            const rect = lcd.getBoundingClientRect();
+            const y = e.clientY - rect.top;
+            const targetRow = Math.max(1, Math.min(10, Math.floor(y / 48) + 1));
+            const dragged = window._draggedWidget;
+            const existingWidget = window._currentScreenData.widgets.find(w => w.lcdRow === targetRow && w.type !== 'button');
+            
+            if (existingWidget && existingWidget !== dragged) {
+                const temp = dragged.lcdRow || 1;
+                dragged.lcdRow = existingWidget.lcdRow || 1;
+                existingWidget.lcdRow = temp;
+            } else if (dragged.lcdRow !== targetRow) {
+                dragged.lcdRow = targetRow;
+            }
+            renderScreen(jsonPath);
+        });
+        lcd._dragEventsAttached = true;
+    }
+
+    // Helper to show the alignment context menu during Visual Edit Mode
+    const showAlignmentMenu = (e, widget, alignKey) => {
+        e.preventDefault();
+        let existingMenu = document.getElementById('visual-edit-context-menu');
+        if (existingMenu) existingMenu.remove();
+        
+        const menu = document.createElement('div');
+        menu.id = 'visual-edit-context-menu';
+        menu.style.position = 'fixed';
+        menu.style.left = e.pageX + 'px';
+        menu.style.top = e.pageY + 'px';
+        menu.style.background = '#fff';
+        menu.style.color = '#000';
+        menu.style.border = '1px solid #ccc';
+        menu.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)';
+        menu.style.zIndex = '10006';
+        menu.style.display = 'flex';
+        menu.style.flexDirection = 'column';
+        menu.style.padding = '5px';
+        
+        ['left', 'center', 'right'].forEach(align => {
+            const btn = document.createElement('button');
+            btn.textContent = 'Align ' + align;
+            btn.style.margin = '2px';
+            btn.style.cursor = 'pointer';
+            btn.onclick = () => {
+                widget[alignKey] = align;
+                renderScreen(jsonPath);
+                menu.remove();
+            };
+            menu.appendChild(btn);
+        });
+
+        // Add Width Nudging to fine-tune the exact horizontal spacing between text and values
+        if (alignKey === 'labelAlign' || alignKey === 'valueAlign') {
+            const hr = document.createElement('hr');
+            hr.style.margin = '4px 0';
+            menu.appendChild(hr);
+            
+            const widthKey = alignKey === 'labelAlign' ? 'labelWidth' : 'valueWidth';
+            const defaultWidth = alignKey === 'labelAlign' ? (data.layout?.labelColumn?.width || 120) : (data.layout?.valueColumn?.width || 100);
+            const charWidth = (data.layout?.lcdCanvas?.width || 320) / (data.layout?.lcdTextColumns || 16);
+            
+            const growBtn = document.createElement('button');
+            growBtn.textContent = 'Grow Width (+1 char)';
+            growBtn.style.margin = '2px';
+            growBtn.onclick = () => { widget[widthKey] = (widget[widthKey] || defaultWidth) + charWidth; renderScreen(jsonPath); menu.remove(); };
+            menu.appendChild(growBtn);
+            
+            const shrinkBtn = document.createElement('button');
+            shrinkBtn.textContent = 'Shrink Width (-1 char)';
+            shrinkBtn.style.margin = '2px';
+            shrinkBtn.onclick = () => { widget[widthKey] = Math.max(charWidth, (widget[widthKey] || defaultWidth) - charWidth); renderScreen(jsonPath); menu.remove(); };
+            menu.appendChild(shrinkBtn);
+        }
+        document.body.appendChild(menu);
+        
+        setTimeout(() => {
+            const closeMenu = (evt) => {
+                if (!menu.contains(evt.target)) {
+                    menu.remove();
+                    document.removeEventListener('click', closeMenu);
+                }
+            };
+            document.addEventListener('click', closeMenu);
+        }, 0);
+    };
+
     // Render all widgets using LVGL-style layout
     // Only menu_row widgets are focusable, in JSON order
     // Sort menuRows by lcdRow for navigation and focus logic
-    const menuRows = data.widgets.filter(w => w.type === 'menu_row').sort((a, b) => (a.lcdRow || 1) - (b.lcdRow || 1));
+    const menuRows = (data.widgets || []).filter(w => w.type === 'menu_row').sort((a, b) => (a.lcdRow || 1) - (b.lcdRow || 1));
     console.log('Menu row order (by lcdRow):', menuRows.map(r => `${r.label} (row ${r.lcdRow})`));
     // Focus is index in sorted menuRows array
-    let menuRowsFocusedIndex = typeof window._networkSettingsFocus === 'number' ? window._networkSettingsFocus : 0;
+    let menuRowsFocusedIndex = typeof window._currentScreenFocus === 'number' ? window._currentScreenFocus : 0;
     let menuRowCounter = 0;
     const menuRowGap = data.layout?.menuRowGap || 0;
     // Use 48px per row for a 10-row grid
@@ -249,51 +461,27 @@ export async function renderNetworkSettings() {
                 header.addEventListener('blur', (e) => {
                     widget.text = e.target.innerText;
                 });
-                header.addEventListener('contextmenu', (e) => {
-                    e.preventDefault();
-                    let existingMenu = document.getElementById('visual-edit-context-menu');
-                    if (existingMenu) existingMenu.remove();
-                    
-                    const menu = document.createElement('div');
-                    menu.id = 'visual-edit-context-menu';
-                    menu.style.position = 'fixed';
-                    menu.style.left = e.pageX + 'px';
-                    menu.style.top = e.pageY + 'px';
-                    menu.style.background = '#fff';
-                    menu.style.color = '#000';
-                    menu.style.border = '1px solid #ccc';
-                    menu.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)';
-                    menu.style.zIndex = '10006';
-                    menu.style.display = 'flex';
-                    menu.style.flexDirection = 'column';
-                    menu.style.padding = '5px';
-                    
-                    ['left', 'center', 'right'].forEach(align => {
-                        const btn = document.createElement('button');
-                        btn.textContent = 'Align ' + align;
-                        btn.style.margin = '2px';
-                        btn.style.cursor = 'pointer';
-                        btn.onclick = () => {
-                            widget.align = align;
-                            renderNetworkSettings();
-                            menu.remove();
-                        };
-                        menu.appendChild(btn);
-                    });
-                    document.body.appendChild(menu);
-                    
-                    setTimeout(() => {
-                        const closeMenu = (evt) => {
-                            if (!menu.contains(evt.target)) {
-                                menu.remove();
-                                document.removeEventListener('click', closeMenu);
-                            }
-                        };
-                        document.addEventListener('click', closeMenu);
-                    }, 0);
-                });
+                header.addEventListener('contextmenu', (e) => showAlignmentMenu(e, widget, 'align'));
             }
             lcd.appendChild(header);
+        } else if (widget.type === 'label') {
+            const label = document.createElement('div');
+            label.style.position = 'absolute';
+            const xPos = widget.x || 0;
+            const yPos = widget.y || 0;
+            label.style.left = xPos + 'px';
+            label.style.top = yPos + 'px';
+            if (widget.align === 'center') {
+                label.style.transform = 'translateX(-50%)';
+            } else if (widget.align === 'right') {
+                label.style.transform = 'translateX(-100%)';
+            }
+            label.style.textAlign = widget.align || 'left';
+            label.style.font = widget.font || (data.styles?.fontSize || '22px') + ' ' + (data.styles?.fontFamily || 'monospace');
+            label.style.color = widget.color || '#fff';
+            label.style.whiteSpace = 'nowrap';
+            label.innerHTML = widget.text.replace(/\n/g, '<br>');
+            lcd.appendChild(label);
         } else if (widget.type === 'menu_row' || widget.type === 'blank') {
             const rowLcdRow = widget.lcdRow || 1;
             if (widget.type === 'menu_row') {
@@ -317,9 +505,49 @@ export async function renderNetworkSettings() {
             row.style.width = (canvasW - rowLeftPad) + 'px';
             row.style.right = '';
 
+            if (window._isVisualEditMode) {
+                row.draggable = true;
+                row.style.cursor = 'grab';
+                row.addEventListener('dragstart', (e) => {
+                    window._draggedWidget = widget;
+                    e.dataTransfer.effectAllowed = 'move';
+                    // Fade the row slightly while dragging it
+                    setTimeout(() => row.style.opacity = '0.4', 0);
+                });
+                row.addEventListener('dragend', () => {
+                    row.style.opacity = '1';
+                    window._draggedWidget = null;
+                });
+                row.addEventListener('dragover', (e) => {
+                    e.preventDefault(); // Necessary to allow dropping
+                    e.dataTransfer.dropEffect = 'move';
+                });
+                row.addEventListener('dragenter', (e) => {
+                    e.preventDefault();
+                    row.style.outline = '2px dashed #ffeb3b';
+                    row.style.outlineOffset = '-2px';
+                });
+                row.addEventListener('dragleave', () => {
+                    row.style.outline = '';
+                });
+                row.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation(); // Stop LCD background drop from double-firing
+                    row.style.outline = '';
+                    const dragged = window._draggedWidget;
+                    if (dragged && dragged !== widget) {
+                        // Swap the lcdRow indexes between the two rows
+                        const tempRow = dragged.lcdRow || 1;
+                        dragged.lcdRow = widget.lcdRow || 1;
+                        widget.lcdRow = tempRow;
+                        renderScreen(jsonPath);
+                    }
+                });
+            }
+
             if (widget.type === 'menu_row') {
                                 // Value
-                                let liveWidget = (window._networkSettingsData?.widgets || []).find(w => w.type === 'menu_row' && w.id === widget.id) || widget;
+                                let liveWidget = (window._currentScreenData?.widgets || []).find(w => w.type === 'menu_row' && w.id === widget.id) || widget;
                                 const valueSpan = document.createElement('span');
                                 valueSpan.textContent = (liveWidget.value ?? liveWidget.options?.[0] ?? '').toString();
                                 valueSpan.style.display = 'inline-block';
@@ -391,7 +619,7 @@ export async function renderNetworkSettings() {
                 // Removed left padding, use non-breaking space for shift
                 labelSpanFixed.style.display = 'inline-block';
                 labelSpanFixed.style.width = (widget.labelWidth || data.layout?.labelColumn?.width || 120) + 'px';
-                labelSpanFixed.style.textAlign = 'left';
+                labelSpanFixed.style.textAlign = widget.labelAlign || data.layout?.labelColumnLayout?.align || 'left';
                 labelSpanFixed.style.fontWeight = 'bold';
                 labelSpanFixed.style.color = '#fff';
                 labelSpanFixed.style.padding = '0';
@@ -399,15 +627,51 @@ export async function renderNetworkSettings() {
                 labelSpanFixed.style.overflow = 'hidden';
                 labelSpanFixed.style.textOverflow = 'ellipsis';
                 labelSpanFixed.style.whiteSpace = 'nowrap';
+
+                if (window._isVisualEditMode) {
+                    labelSpanFixed.style.outline = '1px dashed lightgrey';
+                    labelSpanFixed.style.cursor = 'ew-resize';
+                    labelSpanFixed.contentEditable = 'true';
+                    labelSpanFixed.addEventListener('blur', (e) => {
+                        widget.label = e.target.innerText.replace('\u00A0', '').trim();
+                    });
+                    labelSpanFixed.addEventListener('contextmenu', (e) => showAlignmentMenu(e, widget, 'labelAlign'));
+                    // Fast resize using mouse wheel
+                    labelSpanFixed.addEventListener('wheel', (e) => {
+                        e.preventDefault();
+                        const charWidth = (data.layout?.lcdCanvas?.width || 320) / (data.layout?.lcdTextColumns || 16);
+                        const defaultWidth = data.layout?.labelColumn?.width || 120;
+                        let currentWidth = widget.labelWidth || defaultWidth;
+                        if (e.deltaY < 0) widget.labelWidth = currentWidth + charWidth; // scroll up grows
+                        else widget.labelWidth = Math.max(charWidth, currentWidth - charWidth); // scroll down shrinks
+                        renderScreen(jsonPath);
+                    });
+                }
                 row.appendChild(labelSpanFixed);
                 // (removed duplicate labelSpan code)
-                valueSpan.style.textAlign = 'left';
+                valueSpan.style.textAlign = widget.valueAlign || data.layout?.valueBoxTextAlign || 'right';
                 valueSpan.style.paddingLeft = (data.layout?.valueBoxLeftPadding || 0) + 'px';
                 valueSpan.style.marginRight = (data.layout?.valueBoxRightPadding || 0) + 'px';
                 valueSpan.style.paddingRight = 0;
                 valueSpan.style.whiteSpace = 'nowrap';
                 valueSpan.style.overflow = 'hidden';
                 valueSpan.style.textOverflow = 'ellipsis';
+
+                if (window._isVisualEditMode) {
+                    valueSpan.style.outline = '1px dashed lightgrey';
+                    valueSpan.style.cursor = 'ew-resize';
+                    valueSpan.addEventListener('contextmenu', (e) => showAlignmentMenu(e, widget, 'valueAlign'));
+                    // Fast resize using mouse wheel
+                    valueSpan.addEventListener('wheel', (e) => {
+                        e.preventDefault();
+                        const charWidth = (data.layout?.lcdCanvas?.width || 320) / (data.layout?.lcdTextColumns || 16);
+                        const defaultWidth = data.layout?.valueColumn?.width || 100;
+                        let currentWidth = widget.valueWidth || defaultWidth;
+                        if (e.deltaY < 0) widget.valueWidth = currentWidth + charWidth; // scroll up grows
+                        else widget.valueWidth = Math.max(charWidth, currentWidth - charWidth); // scroll down shrinks
+                        renderScreen(jsonPath);
+                    });
+                }
                 row.appendChild(valueSpan);
             } else if (widget.type === 'blank') {
                 row.style.height = menuRowPixelHeight + 'px';
@@ -443,7 +707,11 @@ export async function renderNetworkSettings() {
     });
 
     // Render all button widgets from JSON
-    const buttonWidgets = data.widgets.filter(w => w.type === 'button');
+    const buttonWidgets = (data.widgets || []).filter(w => w.type === 'button');
+    // Sanitize legacy hardcoded coordinates so auto-centering works properly again
+    buttonWidgets.forEach(w => {
+        if (w.x === 0) delete w.x;
+    });
     const footerPadding = data.layout?.footerPadding || 0;
     // Center the button row horizontally with gap
     const canvasWidth = data.layout?.canvas?.width || 320;
@@ -456,7 +724,8 @@ export async function renderNetworkSettings() {
         const btn = document.createElement('div');
         btn.textContent = widget.label;
         btn.style.position = 'absolute';
-        btn.style.left = runningX + 'px';
+        const currentX = widget.x !== undefined ? widget.x : runningX;
+        btn.style.left = currentX + 'px';
         let y = (widget.y !== undefined ? widget.y : (data.layout?.footer?.y || 435));
         btn.style.top = (y - footerPadding) + 'px';
         const btnWidth = widget.width !== undefined ? widget.width : 72;
@@ -478,10 +747,86 @@ export async function renderNetworkSettings() {
         if (widget.font) {
             btn.style.font = widget.font;
         } else {
-            btn.style.fontSize = '20px';
+            btn.style.fontSize = data.styles?.fontSize || '22px';
+        }
+
+        // Add navigation click handlers
+        if (widget.id === 'btn_back') {
+            btn.style.cursor = 'pointer';
+            btn.addEventListener('click', () => {
+                if (data.page === 'SETUP_MENU') {
+                    window.navigateTo('main');
+                } else if (data.page !== 'MAIN_DISPLAY') {
+                    window.navigateTo('setup'); // All submenus go back to the setup menu
+                }
+            });
+        } else if (widget.id === 'btn_settings') {
+            btn.style.cursor = 'pointer';
+            btn.addEventListener('click', () => window.navigateTo('setup'));
+        } else if (widget.id === 'btn_next') {
+            btn.style.cursor = 'pointer';
+            btn.addEventListener('click', () => {
+                if (data.page === 'SETUP_MENU') {
+                    const menuRows = (data.widgets || []).filter(w => w.type === 'menu_row').sort((a, b) => (a.lcdRow || 1) - (b.lcdRow || 1));
+                    const focusIdx = typeof window._currentScreenFocus === 'number' ? window._currentScreenFocus : 0;
+                    const focusedRow = menuRows[focusIdx];
+                    if (focusedRow) {
+                        if (focusedRow.id === 'ui_item_rs485') window.navigateTo('settings');
+                        else if (focusedRow.id === 'ui_item_ethernet') window.navigateTo('ethernet');
+                        else if (focusedRow.id === 'ui_item_clock') window.navigateTo('clock');
+                        else if (focusedRow.id === 'ui_item_oat') window.navigateTo('oat');
+                        else if (focusedRow.id === 'ui_item_tbd') window.navigateTo('tbd');
+                    }
+                }
+            });
+        }
+
+        if (window._isVisualEditMode) {
+            btn.style.outline = '1px dashed lightgrey';
+            btn.style.cursor = 'context-menu';
+            btn.contentEditable = 'true';
+            btn.addEventListener('blur', (e) => {
+                widget.label = e.target.innerText.trim();
+            });
+            
+            btn.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                let existingMenu = document.getElementById('visual-edit-context-menu');
+                if (existingMenu) existingMenu.remove();
+                
+                const menu = document.createElement('div');
+                menu.id = 'visual-edit-context-menu';
+                menu.style.position = 'fixed';
+                menu.style.left = e.pageX + 'px';
+                menu.style.top = e.pageY + 'px';
+                menu.style.background = '#fff';
+                menu.style.color = '#000';
+                menu.style.border = '1px solid #ccc';
+                menu.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)';
+                menu.style.zIndex = '10006';
+                menu.style.display = 'flex';
+                menu.style.flexDirection = 'column';
+                menu.style.padding = '5px';
+                const charW = (data.layout?.lcdCanvas?.width || 320) / (data.layout?.lcdTextColumns || 16);
+                
+                const nudgeLeft = document.createElement('button');
+                nudgeLeft.textContent = 'Nudge Left (-1 char)';
+                nudgeLeft.style.margin = '2px';
+                nudgeLeft.onclick = () => { widget.x = currentX - charW; renderScreen(jsonPath); menu.remove(); };
+                menu.appendChild(nudgeLeft);
+                
+                const nudgeRight = document.createElement('button');
+                nudgeRight.textContent = 'Nudge Right (+1 char)';
+                nudgeRight.style.margin = '2px';
+                nudgeRight.onclick = () => { widget.x = currentX + charW; renderScreen(jsonPath); menu.remove(); };
+                menu.appendChild(nudgeRight);
+                
+                document.body.appendChild(menu);
+                setTimeout(() => { const closeMenu = (evt) => { if (!menu.contains(evt.target)) { menu.remove(); document.removeEventListener('click', closeMenu); } }; document.addEventListener('click', closeMenu); }, 0);
+            });
         }
         lcd.appendChild(btn);
-        runningX += btnWidth + buttonGap;
+        runningX = currentX + btnWidth + buttonGap;
     });
 }
 
@@ -491,89 +836,127 @@ function handleArrowKey(e) {
     if (handleRedboxArrowKey(e)) return;
     window._tstatLastEvent = e.key;
     console.log('[KeyEvent]', e.key);
+
+    // Setup Menu Shortcut: 's' key or simulated via Left+Right long press
+    if (e.key.toLowerCase() === 's') {
+        if (window._currentScreenData && window._currentScreenData.page === 'MAIN_DISPLAY') {
+            window.navigateTo('setup');
+        }
+        return;
+    }
+
     // Immediately update debug panel after key event
     if (typeof updateDebugPanel === 'function') {
-        updateDebugPanel(window._networkSettingsData);
+        updateDebugPanel(window._currentScreenData);
     }
-    const data = window._networkSettingsData;
+    const data = window._currentScreenData;
     if (!data) return;
-    // Use menuRows sorted by lcdRow for navigation and focus
-    const menuRows = window._networkSettingsData.widgets.filter(w => w.type === 'menu_row').sort((a, b) => (a.lcdRow || 1) - (b.lcdRow || 1));
-    let focusedIndex = typeof window._networkSettingsFocus === 'number' ? window._networkSettingsFocus : 0;
 
-    // Navigation Standard: 
-    // Right arrow moves to the PREV item (-1, visually UP the list)
-    // Left arrow moves to the NEXT item (+1, visually DOWN the list)
-    if (e.key === 'ArrowRight') {
-        // Move focus UP: bottom → top (reverse order)
-        focusedIndex = (focusedIndex - 1 + menuRows.length) % menuRows.length;
-        window._networkSettingsFocus = focusedIndex;
-        renderNetworkSettings();
-        return;
-    } else if (e.key === 'ArrowLeft') {
-        // Move focus DOWN: top → bottom (forward order)
-        focusedIndex = (focusedIndex + 1) % menuRows.length;
-        window._networkSettingsFocus = focusedIndex;
-        renderNetworkSettings();
+    // Only handle menu navigation on screens with menu rows
+    const menuRows = (data.widgets || []).filter(w => w.type === 'menu_row').sort((a, b) => (a.lcdRow || 1) - (b.lcdRow || 1));
+    if (menuRows.length === 0) {
         return;
     }
-    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-        // Change value of focused row only
-        // Always operate on the original row in data.widgets for value assignment
-        const origRow = data.widgets.find(w => w.type === 'menu_row' && w.id === menuRows[focusedIndex].id);
-        if (!origRow) return;
-        // Parameters which have only two states, whether they are numeric or text, will toggle with each hit of the up or down button
-        if (origRow.options) {
-            // Normalize values for robust comparison (trim, string, lowercase)
-            const normalize = v => (typeof v === 'string' ? v.trim().toLowerCase() : String(v).toLowerCase());
-            let currentIdx = origRow.options.findIndex(opt => normalize(opt) === normalize(origRow.value));
-            if (currentIdx === -1) currentIdx = 0;
-            // For two-option rows, always toggle regardless of up/down, and always toggle on every press
-            if (origRow.options.length === 2 && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
-                let newValue;
-                // Always toggle to the other value
-                if (normalize(origRow.value) === normalize(origRow.options[0])) {
-                    newValue = String(origRow.options[1]);
-                } else {
-                    newValue = String(origRow.options[0]);
-                }
-                origRow.value = newValue;
-                // Immediately update the menuRows reversed cache as well (for UI sync)
-                menuRows[focusedIndex].value = newValue;
-            } else if (origRow.options.length > 2 && e.key === 'ArrowUp') {
-                if (currentIdx < origRow.options.length - 1) currentIdx++;
-                origRow.value = String(origRow.options[currentIdx]);
-            } else if (origRow.options.length > 2 && e.key === 'ArrowDown') {
-                if (currentIdx > 0) currentIdx--;
-                origRow.value = String(origRow.options[currentIdx]);
+    let focusedIndex = typeof window._currentScreenFocus === 'number' ? window._currentScreenFocus : 0;
+
+    if (data.page === 'SETUP_MENU') {
+        // Setup Menu logic: Up/Down moves focus, Right selects, Left goes back
+        if (e.key === 'ArrowUp') {
+            focusedIndex = (focusedIndex - 1 + menuRows.length) % menuRows.length;
+            window._currentScreenFocus = focusedIndex;
+            renderScreen(window._currentJsonPath);
+            return;
+        } else if (e.key === 'ArrowDown') {
+            focusedIndex = (focusedIndex + 1) % menuRows.length;
+            window._currentScreenFocus = focusedIndex;
+            renderScreen(window._currentJsonPath);
+            return;
+        } else if (e.key === 'ArrowRight' || e.key === 'Enter') {
+            const focusedRow = menuRows[focusedIndex];
+            if (focusedRow) {
+                if (focusedRow.id === 'ui_item_rs485') window.navigateTo('settings');
+                else if (focusedRow.id === 'ui_item_ethernet') window.navigateTo('ethernet');
+                else if (focusedRow.id === 'ui_item_clock') window.navigateTo('clock');
+                else if (focusedRow.id === 'ui_item_oat') window.navigateTo('oat');
+                else if (focusedRow.id === 'ui_item_tbd') window.navigateTo('tbd');
             }
-        } else if (origRow.id === 'ui_item_addr') {
-            let v = Number(origRow.value) || 1;
-            const maxValue = origRow.maxValue || 247;
-            const minValue = 1;
-            if (e.key === 'ArrowUp') v = v >= maxValue ? maxValue : v + 1;
-            else if (e.key === 'ArrowDown') v = v <= minValue ? minValue : v - 1;
-            origRow.value = v;
-        } else if (origRow.id === 'ui_item_ip') {
-            let parts = String(origRow.value).split('.').map(Number);
-            if (parts.length === 4) {
-                if (e.key === 'ArrowUp') parts[3] = (parts[3] + 1) % 256;
-                else parts[3] = (parts[3] - 1 + 256) % 256;
-                origRow.value = parts.join('.');
-            }
+            return;
+        } else if (e.key === 'ArrowLeft') {
+            window.navigateTo('main');
+            return;
         }
-        renderNetworkSettings();
-        return;
+    } else {
+        // Settings Pages Navigation Standard: 
+        // Right arrow (NEXT) moves focus to the NEXT item (+1, visually DOWN the list)
+        // Left arrow (BACK) exits the current screen and returns to the Setup Menu
+        if (e.key === 'ArrowRight') {
+            // Move focus DOWN: top → bottom (forward order)
+            focusedIndex = (focusedIndex + 1) % menuRows.length;
+            window._currentScreenFocus = focusedIndex;
+            renderScreen(window._currentJsonPath);
+            return;
+        } else if (e.key === 'ArrowLeft') {
+            window.navigateTo('setup');
+            return;
+        }
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+            // Change value of focused row only
+            // Always operate on the original row in data.widgets for value assignment
+            const origRow = data.widgets.find(w => w.type === 'menu_row' && w.id === menuRows[focusedIndex].id);
+            if (!origRow) return;
+            // Parameters which have only two states, whether they are numeric or text, will toggle with each hit of the up or down button
+            if (origRow.options) {
+                // Normalize values for robust comparison (trim, string, lowercase)
+                const normalize = v => (typeof v === 'string' ? v.trim().toLowerCase() : String(v).toLowerCase());
+                let currentIdx = origRow.options.findIndex(opt => normalize(opt) === normalize(origRow.value));
+                if (currentIdx === -1) currentIdx = 0;
+                // For two-option rows, always toggle regardless of up/down, and always toggle on every press
+                if (origRow.options.length === 2 && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+                    let newValue;
+                    // Always toggle to the other value
+                    if (normalize(origRow.value) === normalize(origRow.options[0])) {
+                        newValue = String(origRow.options[1]);
+                    } else {
+                        newValue = String(origRow.options[0]);
+                    }
+                    origRow.value = newValue;
+                    // Immediately update the menuRows reversed cache as well (for UI sync)
+                    menuRows[focusedIndex].value = newValue;
+                } else if (origRow.options.length > 2 && e.key === 'ArrowUp') {
+                    if (currentIdx < origRow.options.length - 1) currentIdx++;
+                    origRow.value = String(origRow.options[currentIdx]);
+                } else if (origRow.options.length > 2 && e.key === 'ArrowDown') {
+                    if (currentIdx > 0) currentIdx--;
+                    origRow.value = String(origRow.options[currentIdx]);
+                }
+            } else if (origRow.id === 'ui_item_addr') {
+                let v = Number(origRow.value) || 1;
+                const maxValue = origRow.maxValue || 247;
+                const minValue = 1;
+                if (e.key === 'ArrowUp') v = v >= maxValue ? maxValue : v + 1;
+                else if (e.key === 'ArrowDown') v = v <= minValue ? minValue : v - 1;
+                origRow.value = v;
+            } else if (origRow.id === 'ui_item_ip') {
+                let parts = String(origRow.value).split('.').map(Number);
+                if (parts.length === 4) {
+                    if (e.key === 'ArrowUp') parts[3] = (parts[3] + 1) % 256;
+                    else parts[3] = (parts[3] - 1 + 256) % 256;
+                    origRow.value = parts.join('.');
+                }
+            }
+            renderScreen(window._currentJsonPath);
+            return;
+        }
     }
     // No action for other keys
 }
 
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
-        renderNetworkSettings();
+        window.navigateTo('main');
         window.addEventListener('keydown', handleArrowKey);
     });
 } else {
-    renderNetworkSettings();
+    window.navigateTo('main');
     window.addEventListener('keydown', handleArrowKey);
 }
