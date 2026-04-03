@@ -1,0 +1,28 @@
+{
+  "page": "TBD_SETTINGS",
+  "styles": {
+    "bg": "#003366", "highlight": "#008080", "fontFamily": "'Fira Mono', 'Consolas', 'Menlo', 'Monaco', 'Liberation Mono', 'Courier New', monospace", "fontWeight": "900", "fontSize": "32px"
+  },
+  "layout": {
+    "lcdCanvas": { "width": 320, "height": 480 },
+    "lcdTextRows": 10, "lcdTextColumns": 16,
+    "labelColumnLayout": { "x": 20, "width": 120 },
+    "valueColumnLayout": { "x": 160, "width": 160 },
+    "menuRowPixelHeight": 48,
+    "headerLayout": { "x": 160, "y": 40, "align": "center", "font": "FONT_18_BOLD" },
+    "footerLayout": { "x": 0, "y": 420, "width": 320, "height": 48 },
+    "footerTopPadding": 6, "buttonHorizontalGap": 6,
+    "menuRowVerticalGap": 4, "valueBoxRightPadding": 20,
+    "valueBoxLeftPadding": 12, "valueBoxTextAlign": "right",
+    "menuRowLeftPadding": 20
+  },
+  "widgets": [
+    { "type": "blank", "lcdRow": 1 },
+    { "type": "header", "text": "To Be Done", "x": 160, "y": 40, "align": "center", "font": "FONT_18_BOLD", "lcdRow": 2 },
+    { "type": "menu_row", "id": "ui_item_tbd_1", "label": "Feature", "value": "Coming Soon", "labelWidth": 140, "valueX": 160, "valueWidth": 130, "lcdRow": 3 },
+    { "type": "button", "id": "btn_back", "label": "BACK", "width": 92, "height": 45, "font": "32px 'Fira Mono', 'Consolas', monospace", "lcdRow": 9 },
+    { "type": "button", "id": "btn_down", "label": "▼", "width": 48, "height": 45, "font": "38px 'Fira Mono', 'Consolas', monospace", "lcdRow": 9 },
+    { "type": "button", "id": "btn_up", "label": "▲", "width": 48, "height": 45, "font": "38px 'Fira Mono', 'Consolas', monospace", "lcdRow": 9 },
+    { "type": "button", "id": "btn_next", "label": "NEXT", "width": 92, "height": 45, "font": "32px 'Fira Mono', 'Consolas', monospace", "lcdRow": 9 }
+  ]
+}

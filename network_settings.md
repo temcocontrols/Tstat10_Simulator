@@ -27,47 +27,18 @@ The following table defines the link between the UI "Text Description" and the C
 | Protocol    | ui_item_prot   | PROTOCOL_TYPE    | enum        | 0 (Modbus RTU)  |
 | IP Address  | ui_item_ip     | IP_ADDR_0        | ipv4        | 192.168.0.1     |
 
+
 ### 4. Text-Based UI Description (JSON)
 This is the payload that the Phase 1 Simulator will ingest to render the page.
 
-```json
-{
-  "page": "NETWORK_SETTINGS",
-  "styles": {
-    "bg": "#003366",
-    "highlight": "#008080"
-  },
-  "widgets": [
-    {
-      "type": "header",
-      "text": "Communication\nSettings"
-    },
-    {
-      "type": "menu_row",
-      "id": "ui_item_addr",
-      "label": "Modbus ID",
-      "register": 6,
-      "is_focused": true
-    },
-    {
-      "type": "menu_row",
-      "id": "ui_item_baud",
-      "label": "Baudrate",
-      "register": 7,
-      "options": [9600, 19200, 38400, 115200]
-    },
-    {
-      "type": "nav_footer",
-      "left_btn": "BACK",
-      "right_btn": "SAVE"
-    }
-  ]
-}
-```
+See the file network_settings.json for the JSON payload used to render the Network Settings page.
+
+### 4a. Text Truncation Rule
+If the label or value text is too long for the available space, it will be truncated with an ellipsis (`...`). Word wrap is never used; all text is forced to a single line.
 
 ### 5. Interaction Model
 - **Focus State:** The "Focused" item (defined in JSON) must render with the Teal background color (#008080) to match the hardware's selection cursor.
 - **Navigation:**
-  - UP/DOWN Buttons: Cycle the is_focused property through the widget array.
-  - LEFT/RIGHT Buttons: Increment/Decrement the value of the focused register.
+  - UP/DOWN: Cycle the is_focused property through the widget array.
+  - LEFT/RIGHT: Increment/Decrement the value of the focused register.
 - **Phase 2 Sync:** Every value change in the simulator will eventually trigger a Modbus PRESET_SINGLE_REGISTER command to the hardware.

@@ -1,3 +1,18 @@
+/* Debug 20px alignment grid overlay for Tstat10 LCD */
+
+.debug-grid {
+    position: absolute;
+    top: 0; left: 0;
+    width: 320px;
+    height: 480px;
+    pointer-events: none;
+    z-index: 9999;
+    display: none;
+}
+
+.debug-active .debug-grid {
+    display: block;
+}
 /* Enforce flat 2D plane for #tstat-lcd */
 #tstat-lcd {
     box-shadow: none !important;
@@ -14,9 +29,9 @@
     border-radius: 4px;
     position: relative;
     box-shadow: none !important;
-    /* THE REALISTIC FIX: ADD PADDING TO THE TOP AND BOTTOM */
-    padding-top: 100px; /* Moves content down below the physical vent area */
-    padding-bottom: 80px; /* Keeps content above the physical button area */
+    /* Remove top/bottom padding to allow absolute positioning by renderer */
+    padding-top: 0;
+    padding-bottom: 0;
 }
 
 /* Vertical Tstat10 Screen Constraint */
