@@ -36,7 +36,7 @@
     transform: translateX(-50%) translateY(0);
     width: var(--lcd-lens-width);
     height: var(--lcd-lens-height);
-    border: var(--lcd-lens-thickness) solid red; /* DEBUG: red lens outline */
+    border: var(--lcd-lens-thickness) solid #c4c4c4; /* lens outline (if pseudo-elements enabled) */
     border-radius: var(--lcd-radius);
     pointer-events: none;
     z-index: 13;
@@ -63,7 +63,7 @@
     --lcd-bezel-color: #888; /* Bezel color as parameter */
     --lcd-lens-thickness: 6px; /* Standalone lens thickness */
     --lcd-lens-width: 432px;  /* Lens width: 50% wider */
-    --lcd-lens-height: 520px; /* Lens height: increased by 30% */
+    --lcd-lens-height: 717px; /* matches Math.round(484×1.3×1.2×0.95) in network-settings-renderer.js */
     --lcd-lens-y: 0px; /* Vertical offset for lens positioning */
     --lcd-background-color: #3498db; /* LCD background color */
     --color2: #e67e22; /* Custom color 2 */
@@ -135,8 +135,8 @@
         width: 475px; /* 432px * 1.1 */
         height: 484px; /* 440px * 1.1 */
         border-radius: 36px;
-        border: 2px solid red;
-        background: rgba(255,0,0,0.05);
+        border: 2px solid #c4c4c4;
+        background: transparent;
         z-index: 2;
         pointer-events: none;
     }
