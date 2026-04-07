@@ -5,6 +5,12 @@
 		},
 		{
 			"path": "../T3-programmable-controller-on-ESP32"
+		},
+		{
+			"path": "../T3000_Building_Automation_System"
+		},
+		{
+			"path": "../T3000Webview"
 		}
 	],
 	"settings": {

@@ -20,10 +20,43 @@ function startAutoTester() {
 import { getRedboxCoords, redbox, resetRedbox } from './coords.js';
 import { renderRedboxOverlay, updateRedboxDebugPanel } from './ui.js';
 import { handleRedboxArrowKey } from './events.js';
-import { renderMenuHeader, renderMenuRows, renderArrowRow, renderDeadRow } from './menu-ui.js';
 import { setupDebugToggles } from './debug-toggles.js';
 import { updateDebugPanel } from './debug-panel-fixed.js';
+import { ensureCanonicalSchema, validateLayoutData, writeStatus } from './lcd-editor-core.js';
 
+/** Escape text for safe insertion into innerHTML */
+function escapeHtml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/**
+ * IPv4 with aligned periods: fixed-width octet spans so dots line up vertically across rows.
+ */
+function formatIPv4AlignedHtml(value) {
+    const s = String(value).trim();
+    const parts = s.split('.');
+    if (parts.length !== 4) return null;
+    if (!parts.every(p => /^\d{1,3}$/.test(p))) return null;
+    const oct = (p) => `<span class="tstat-ipv4-oct">${escapeHtml(p)}</span>`;
+    const dot = '<span class="tstat-ipv4-dot">.</span>';
+    return `${oct(parts[0])}${dot}${oct(parts[1])}${dot}${oct(parts[2])}${dot}${oct(parts[3])}`;
+}
+
+function ensureIpv4AlignedStyles() {
+    if (document.getElementById('tstat-ipv4-styles')) return;
+    const st = document.createElement('style');
+    st.id = 'tstat-ipv4-styles';
+    st.textContent = `
+        #tstat-lcd-container .tstat-ipv4-oct {
+            display: inline-block;
+            width: 3ch;
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+        #tstat-lcd-container .tstat-ipv4-dot { display: inline-block; }
+    `;
+    document.head.appendChild(st);
+}
 
 // Central navigation function
 window.navigateTo = function(screenName) {
@@ -100,28 +133,29 @@ export async function renderScreen(jsonPath) {
     if (prevGrid) prevGrid.remove();
     // Do NOT clear lcdGrid.innerHTML here—main UI will be rendered below
 
-    // --- Draw lens outline (light grey rounded rectangle) ---
-    // Remove previous lens if present
-    const prevLens = lcdGrid.querySelector('.tstat-lens-outline');
-    if (prevLens) prevLens.remove();
-    const lens = document.createElement('div');
-    lens.className = 'tstat-lens-outline';
-    lens.style.position = 'absolute';
-    // Centered: 16px margin on each side (288px wide on 320px canvas)
-    // Make lens 50% wider and centered
-    const lensWidth = 288 * 1.5; // 432px
-    lens.style.left = `${(320 - lensWidth) / 2}px`;
-    lens.style.top = '0px';
-        lens.style.width = '475px'; // 432px * 1.1
-        lens.style.height = '484px'; // 440px * 1.1
-    lens.style.borderRadius = '32px';
-    lens.style.border = '3px solid red';
-    lens.style.background = 'rgba(255,0,0,0.05)'; // subtle red tint for debugging
-    lens.style.boxSizing = 'border-box';
-    lens.style.pointerEvents = 'none';
-    lens.style.zIndex = '10';
-    // Insert as first child so all UI renders above it
-    lcdGrid.insertBefore(lens, lcdGrid.firstChild);
+    // --- Lens outline ("redbox"): framed glass, aligned to top of thermostat body ---
+    const deviceBezel = lcdGrid.closest('.device-bezel');
+    const prevLensLegacy = lcdGrid.querySelector('.tstat-lens-outline');
+    if (prevLensLegacy) prevLensLegacy.remove();
+    if (deviceBezel) {
+        const prevLens = deviceBezel.querySelector('.tstat-lens-outline');
+        if (prevLens) prevLens.remove();
+        const lens = document.createElement('div');
+        lens.className = 'tstat-lens-outline';
+        lens.setAttribute('aria-hidden', 'true');
+        lens.style.position = 'absolute';
+        lens.style.top = '0';
+        lens.style.left = '50%';
+        lens.style.transform = 'translateX(-50%)';
+        lens.style.width = '475px';
+        lens.style.height = `${Math.round(484 * 1.3 * 1.2 * 0.95)}px`; /* +30% / +20% vs 484px base, then −5% */
+        lens.style.border = '3px solid #c4c4c4';
+        lens.style.background = 'transparent';
+        lens.style.boxSizing = 'border-box';
+        lens.style.pointerEvents = 'none';
+        lens.style.zIndex = '15';
+        deviceBezel.appendChild(lens);
+    }
         // ...existing code...
         // After main UI is rendered, add grid overlay if enabled
         setTimeout(() => {
@@ -141,7 +175,7 @@ export async function renderScreen(jsonPath) {
                 grid.style.width = '320px';
                 grid.style.height = '480px';
                 // Draw grid lines to match lcdTextRows and lcdTextColumns
-                const data = window._networkSettingsData;
+                const data = window._currentScreenData;
                 const rows = data?.layout?.lcdTextRows || 10;
                 const cols = data?.layout?.lcdTextColumns || 16;
                 const width = 320;
@@ -203,9 +237,9 @@ export async function renderScreen(jsonPath) {
     const lcd = document.getElementById('tstat-lcd-container');
     if (!lcd) return;
 
-    // Clear old UI elements, but preserve the lens and grid we just set up
+    // Clear old UI elements, but preserve the grid overlay (lens lives on .device-bezel)
     Array.from(lcd.children).forEach(child => {
-        if (!child.classList.contains('tstat-lens-outline') && !child.classList.contains('debug-grid')) child.remove();
+        if (!child.classList.contains('debug-grid')) child.remove();
     });
 
     // Debug layer flags (global for toggling) - allow toggles to control overlays
@@ -316,14 +350,81 @@ export async function renderScreen(jsonPath) {
         }
     }
     data = window._currentScreenData;
+    ensureCanonicalSchema(data);
+    ensureIpv4AlignedStyles();
 
-    lcd.style.background = data.styles?.bg || '#003366';
+    const bindEditorControls = () => {
+        if (window._lcdEditorPanelBound) return;
+        window._lcdEditorPanelBound = true;
+
+        const widthInput = document.getElementById('editor-canvas-width');
+        const heightInput = document.getElementById('editor-canvas-height');
+        const orientationInput = document.getElementById('editor-orientation');
+        const colorModeInput = document.getElementById('editor-color-mode');
+        const applyBtn = document.getElementById('editor-apply-canvas');
+        const validateBtn = document.getElementById('editor-validate');
+        const resultBox = document.getElementById('editor-validation-result');
+
+        const updateInputsFromData = () => {
+            if (!window._currentScreenData) return;
+            const d = window._currentScreenData;
+            widthInput.value = d.canvasProfile?.width || 320;
+            heightInput.value = d.canvasProfile?.height || 480;
+            orientationInput.value = d.canvasProfile?.orientation || 'vertical';
+            colorModeInput.value = d.colorProfile?.mode || 'indexed';
+        };
+
+        const showValidation = (result) => {
+            if (!resultBox) return;
+            const messages = [];
+            if (result.errors.length) messages.push('Errors: ' + result.errors.join(' | '));
+            if (result.warnings.length) messages.push('Warnings: ' + result.warnings.join(' | '));
+            if (!messages.length) messages.push('Validation passed.');
+            resultBox.textContent = messages.join('\n');
+            resultBox.style.color = result.errors.length ? '#b00020' : '#0b6d2f';
+        };
+
+        applyBtn?.addEventListener('click', () => {
+            const d = window._currentScreenData;
+            if (!d) return;
+            d.canvasProfile.width = Number(widthInput.value || 320);
+            d.canvasProfile.height = Number(heightInput.value || 480);
+            d.canvasProfile.orientation = orientationInput.value || 'vertical';
+            d.colorProfile.mode = colorModeInput.value || 'indexed';
+            ensureCanonicalSchema(d);
+            writeStatus('Applied canvas/color profile to current screen JSON.');
+            renderScreen(window._currentJsonPath || jsonPath);
+        });
+
+        validateBtn?.addEventListener('click', () => {
+            const d = window._currentScreenData;
+            if (!d) return;
+            const result = validateLayoutData(d);
+            showValidation(result);
+            writeStatus(
+                result.valid ? 'Validation passed for current screen.' : 'Validation errors found. Check LCD Editor panel.',
+                !result.valid
+            );
+        });
+
+        window._syncLcdEditorInputs = updateInputsFromData;
+        updateInputsFromData();
+    };
+
+    bindEditorControls();
+    if (typeof window._syncLcdEditorInputs === 'function') {
+        window._syncLcdEditorInputs();
+    }
+
+    lcd.style.background = data.styles?.bg || '#2c7cc4';
     lcd.style.color = '#fff';
     lcd.style.position = 'relative';
     lcd.style.fontFamily = data.styles?.fontFamily || 'Segoe UI, Arial, sans-serif';
     lcd.style.padding = '0';
-    lcd.style.width = (data.layout?.canvas?.width || 320) + 'px';
-    lcd.style.height = (data.layout?.canvas?.height || 480) + 'px';
+    const lcdCanvasWidth = data.canvasProfile?.width || data.layout?.canvas?.width || 320;
+    const lcdCanvasHeight = data.canvasProfile?.height || data.layout?.canvas?.height || 480;
+    lcd.style.width = lcdCanvasWidth + 'px';
+    lcd.style.height = lcdCanvasHeight + 'px';
 
     // Allow dropping elements onto empty grid spaces
     if (!lcd._dragEventsAttached) {
@@ -429,6 +530,10 @@ export async function renderScreen(jsonPath) {
     console.log('Menu row order (by lcdRow):', menuRows.map(r => `${r.label} (row ${r.lcdRow})`));
     // Focus is index in sorted menuRows array
     let menuRowsFocusedIndex = typeof window._currentScreenFocus === 'number' ? window._currentScreenFocus : 0;
+    if (menuRows.length > 0) {
+        menuRowsFocusedIndex = ((menuRowsFocusedIndex % menuRows.length) + menuRows.length) % menuRows.length;
+        window._currentScreenFocus = menuRowsFocusedIndex;
+    }
     let menuRowCounter = 0;
     const menuRowGap = data.layout?.menuRowGap || 0;
     // Use 48px per row for a 10-row grid
@@ -466,11 +571,13 @@ export async function renderScreen(jsonPath) {
             lcd.appendChild(header);
         } else if (widget.type === 'label') {
             const label = document.createElement('div');
+            if (widget.id) label.id = widget.id;
             label.style.position = 'absolute';
             const xPos = widget.x || 0;
             const yPos = widget.y || 0;
             label.style.left = xPos + 'px';
             label.style.top = yPos + 'px';
+            if (widget.width != null) label.style.width = widget.width + 'px';
             if (widget.align === 'center') {
                 label.style.transform = 'translateX(-50%)';
             } else if (widget.align === 'right') {
@@ -479,7 +586,7 @@ export async function renderScreen(jsonPath) {
             label.style.textAlign = widget.align || 'left';
             label.style.font = widget.font || (data.styles?.fontSize || '22px') + ' ' + (data.styles?.fontFamily || 'monospace');
             label.style.color = widget.color || '#fff';
-            label.style.whiteSpace = 'nowrap';
+            label.style.whiteSpace = widget.wrap ? 'normal' : 'nowrap';
             label.innerHTML = widget.text.replace(/\n/g, '<br>');
             lcd.appendChild(label);
         } else if (widget.type === 'menu_row' || widget.type === 'blank') {
@@ -549,14 +656,34 @@ export async function renderScreen(jsonPath) {
                                 // Value
                                 let liveWidget = (window._currentScreenData?.widgets || []).find(w => w.type === 'menu_row' && w.id === widget.id) || widget;
                                 const valueSpan = document.createElement('span');
-                                valueSpan.textContent = (liveWidget.value ?? liveWidget.options?.[0] ?? '').toString();
+                                if (widget.valueId) valueSpan.id = widget.valueId;
+                                const isMainHome = data.page === 'MAIN_DISPLAY';
+                                const rawVal = (liveWidget.value ?? liveWidget.options?.[0] ?? '').toString();
+                                const ipv4RowIds = ['ui_item_ip', 'ui_item_mask', 'ui_item_gw'];
+                                const ipv4Html = !isMainHome && ipv4RowIds.includes(widget.id) ? formatIPv4AlignedHtml(rawVal) : null;
+                                if (ipv4Html) valueSpan.innerHTML = ipv4Html;
+                                else valueSpan.textContent = rawVal;
                                 valueSpan.style.display = 'inline-block';
                                 valueSpan.style.padding = '0';
                                 valueSpan.style.margin = '0';
-                                valueSpan.style.background = '#fff';
-                                valueSpan.style.color = '#003366';
+                                if (isMainHome) {
+                                    valueSpan.style.background = 'transparent';
+                                    valueSpan.style.color = '#ffffff';
+                                    valueSpan.style.border = '1px solid #ffffff';
+                                    valueSpan.style.borderRadius = '4px';
+                                    valueSpan.style.padding = '4px 10px';
+                                    valueSpan.style.boxSizing = 'border-box';
+                                } else {
+                                    valueSpan.style.background = '#fff';
+                                    valueSpan.style.color = '#003366';
+                                    valueSpan.style.borderRadius = '8px';
+                                    valueSpan.style.display = 'inline-flex';
+                                    valueSpan.style.alignItems = 'center';
+                                    valueSpan.style.justifyContent = ipv4Html ? 'flex-start' : 'flex-end';
+                                    valueSpan.style.boxSizing = 'border-box';
+                                    valueSpan.style.minHeight = Math.max(0, menuRowPixelHeight - 6) + 'px';
+                                }
                                 valueSpan.style.fontWeight = 'bold';
-                                valueSpan.style.borderRadius = '8px';
                                 valueSpan.style.width = (widget.valueWidth || data.layout?.valueColumn?.width || 100) + 'px';
                                 valueSpan.style.marginLeft = 'auto';
                                 valueSpan.style.textAlign = 'left';
@@ -582,7 +709,13 @@ export async function renderScreen(jsonPath) {
                 highlight.style.pointerEvents = 'none';
                 // Focus logic: highlight only if this menu_row is the focused one (by id)
                 const focusedMenuRow = menuRows[menuRowsFocusedIndex];
-                highlight.style.opacity = (widget.id === focusedMenuRow.id) ? '1' : '0';
+                if (data.page === 'MAIN_DISPLAY') {
+                    highlight.style.background = 'rgba(255,255,255,0.22)';
+                    highlight.style.opacity = (widget.id === focusedMenuRow?.id) ? '1' : '0';
+                } else {
+                    highlight.style.background = data.styles?.highlight || '#008080';
+                    highlight.style.opacity = (widget.id === focusedMenuRow?.id) ? '1' : '0';
+                }
                 row.insertBefore(highlight, row.firstChild);
                 // Ensure row contents are above highlight
                 setTimeout(() => {
@@ -595,7 +728,10 @@ export async function renderScreen(jsonPath) {
                 }, 0);
                 row.style.height = menuRowPixelHeight + 'px';
                 // Default background for non-focused rows
-                if (widget.id !== focusedMenuRow.id) {
+                if (data.page === 'MAIN_DISPLAY') {
+                    row.style.background = 'transparent';
+                    row.style.boxShadow = '';
+                } else if (widget.id !== focusedMenuRow.id) {
                     row.style.background = 'rgba(0,0,0,0.08)';
                     row.style.boxShadow = '';
                 } else {
@@ -615,7 +751,7 @@ export async function renderScreen(jsonPath) {
 
                 // Label
                 const labelSpanFixed = document.createElement('span');
-                labelSpanFixed.textContent = '\u00A0' + widget.label;
+                labelSpanFixed.textContent = (data.page === 'MAIN_DISPLAY' ? '' : '\u00A0') + widget.label;
                 // Removed left padding, use non-breaking space for shift
                 labelSpanFixed.style.display = 'inline-block';
                 labelSpanFixed.style.width = (widget.labelWidth || data.layout?.labelColumn?.width || 120) + 'px';
@@ -656,6 +792,19 @@ export async function renderScreen(jsonPath) {
                 valueSpan.style.whiteSpace = 'nowrap';
                 valueSpan.style.overflow = 'hidden';
                 valueSpan.style.textOverflow = 'ellipsis';
+                if (data.page === 'MAIN_DISPLAY') {
+                    valueSpan.style.padding = '4px 10px';
+                    valueSpan.style.boxSizing = 'border-box';
+                }
+
+                const longParamIds = ['ui_item_ip', 'ui_item_mask', 'ui_item_gw'];
+                const isLongParam = widget.longValue === true || longParamIds.includes(widget.id);
+                if (isLongParam && !isMainHome) {
+                    valueSpan.style.overflowX = 'auto';
+                    valueSpan.style.overflowY = 'hidden';
+                    valueSpan.style.textOverflow = 'clip';
+                    valueSpan.title = 'Scroll wheel to see full text; ↑/↓ adjusts octet when editing IP';
+                }
 
                 if (window._isVisualEditMode) {
                     valueSpan.style.outline = '1px dashed lightgrey';
@@ -671,6 +820,12 @@ export async function renderScreen(jsonPath) {
                         else widget.valueWidth = Math.max(charWidth, currentWidth - charWidth); // scroll down shrinks
                         renderScreen(jsonPath);
                     });
+                } else if (isLongParam && !isMainHome) {
+                    valueSpan.addEventListener('wheel', (e) => {
+                        if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+                        e.preventDefault();
+                        valueSpan.scrollLeft += e.deltaY;
+                    }, { passive: false });
                 }
                 row.appendChild(valueSpan);
             } else if (widget.type === 'blank') {
@@ -712,13 +867,14 @@ export async function renderScreen(jsonPath) {
     buttonWidgets.forEach(w => {
         if (w.x === 0) delete w.x;
     });
-    const footerPadding = data.layout?.footerPadding || 0;
-    // Center the button row horizontally with gap
-    const canvasWidth = data.layout?.canvas?.width || 320;
-    const buttonGap = data.layout?.buttonGap || 0;
+    const defaultFooterY = data.layout?.footerLayout?.y ?? data.layout?.footer?.y ?? 435;
+    const footerPadding = data.layout?.footerPadding ?? 0;
+    const footerBottomPadding = data.layout?.footerBottomPadding ?? 0;
+    // Center the button row horizontally with gap (reuse lcdCanvasWidth from canvas setup above)
+    const buttonGap = data.layout?.buttonGap ?? data.layout?.buttonHorizontalGap ?? 0;
     const buttonWidths = buttonWidgets.map(w => w.width !== undefined ? w.width : 72);
     const totalButtonWidth = buttonWidths.reduce((a, b) => a + b, 0) + buttonGap * (buttonWidgets.length - 1);
-    const startX = Math.round((canvasWidth - totalButtonWidth) / 2);
+    const startX = Math.round((lcdCanvasWidth - totalButtonWidth) / 2);
     let runningX = startX;
     buttonWidgets.forEach((widget, idx) => {
         const btn = document.createElement('div');
@@ -726,8 +882,8 @@ export async function renderScreen(jsonPath) {
         btn.style.position = 'absolute';
         const currentX = widget.x !== undefined ? widget.x : runningX;
         btn.style.left = currentX + 'px';
-        let y = (widget.y !== undefined ? widget.y : (data.layout?.footer?.y || 435));
-        btn.style.top = (y - footerPadding) + 'px';
+        let y = (widget.y !== undefined ? widget.y : defaultFooterY);
+        btn.style.top = (y - footerPadding - footerBottomPadding) + 'px';
         const btnWidth = widget.width !== undefined ? widget.width : 72;
         btn.style.width = btnWidth + 'px';
         btn.style.height = (widget.height !== undefined ? widget.height : 45) + 'px';
@@ -828,6 +984,94 @@ export async function renderScreen(jsonPath) {
         lcd.appendChild(btn);
         runningX = currentX + btnWidth + buttonGap;
     });
+
+    // WiFi settings: show full focused value on the row immediately above the footer buttons
+    if (data.page === 'WIFI_SETTINGS') {
+        const menuRowsList = (data.widgets || []).filter(w => w.type === 'menu_row').sort((a, b) => (a.lcdRow || 1) - (b.lcdRow || 1));
+        const focusIdx = typeof window._currentScreenFocus === 'number' ? window._currentScreenFocus : 0;
+        const focused = menuRowsList[Math.min(Math.max(0, focusIdx), Math.max(0, menuRowsList.length - 1))];
+        const firstBtn = buttonWidgets[0];
+        const footerY = firstBtn && firstBtn.y !== undefined ? firstBtn.y : defaultFooterY;
+        const footerPad = (data.layout?.footerPadding ?? 0) + (data.layout?.footerBottomPadding ?? 0);
+        const buttonTopPx = footerY - footerPad;
+        const previewTopPx = Math.max(0, buttonTopPx - menuRowPixelHeight);
+
+        const preview = document.createElement('div');
+        preview.className = 'tstat-wifi-focus-preview';
+        preview.setAttribute('aria-live', 'polite');
+        preview.style.position = 'absolute';
+        preview.style.left = '0';
+        preview.style.width = '100%';
+        preview.style.height = menuRowPixelHeight + 'px';
+        preview.style.top = previewTopPx + 'px';
+        preview.style.boxSizing = 'border-box';
+        preview.style.padding = '4px 10px';
+        preview.style.display = 'flex';
+        preview.style.alignItems = 'center';
+        preview.style.justifyContent = 'center';
+        preview.style.fontFamily = data.styles?.fontFamily || 'monospace';
+        preview.style.fontSize = '22px';
+        preview.style.fontWeight = 'bold';
+        preview.style.color = '#fff';
+        preview.style.background = 'rgba(0,0,0,0.32)';
+        preview.style.borderTop = '1px solid rgba(255,255,255,0.22)';
+        preview.style.borderBottom = '1px solid rgba(255,255,255,0.12)';
+        preview.style.zIndex = '12';
+        preview.style.overflowX = 'auto';
+        preview.style.overflowY = 'hidden';
+        preview.style.whiteSpace = 'nowrap';
+        preview.style.pointerEvents = 'none';
+
+        if (focused) {
+            const live = (data.widgets || []).find(w => w.type === 'menu_row' && w.id === focused.id) || focused;
+            const raw = (live.value ?? live.options?.[0] ?? '').toString();
+            preview.textContent = `${live.label}: ${raw}`;
+        }
+        lcd.appendChild(preview);
+    }
+}
+
+/**
+ * Home screen (MAIN_DISPLAY): SET = setpoint step; FAN/SYS = MSV-style option lists (var2/var3).
+ * Setpoint uses step/min/max on main_row_set; fan order matches MODBUS 0–4: OFF, LOW, MED, HIGH, AUTO.
+ */
+function adjustMainHomeRowValue(origRow, e) {
+    const isUp = e.key === 'ArrowUp';
+    const normalize = v => (typeof v === 'string' ? v.trim().toLowerCase() : String(v).toLowerCase());
+
+    if (origRow.homeRow === 'setpoint' || origRow.id === 'main_row_set') {
+        const step = origRow.step ?? 0.5;
+        const min = origRow.min ?? 10;
+        const max = origRow.max ?? 35;
+        let v = parseFloat(String(origRow.value).replace(',', '.')) || 0;
+        if (isUp) v = Math.min(max, Math.round((v + step) * 100) / 100);
+        else v = Math.max(min, Math.round((v - step) * 100) / 100);
+        origRow.value = v.toFixed(2);
+        if (typeof window.updateUI === 'function') window.updateUI({ stp: v });
+        return;
+    }
+
+    if (origRow.options && origRow.options.length) {
+        let currentIdx = origRow.options.findIndex(opt => normalize(opt) === normalize(origRow.value));
+        if (currentIdx === -1) currentIdx = 0;
+        if (origRow.options.length === 2) {
+            origRow.value = String(
+                normalize(origRow.value) === normalize(origRow.options[0])
+                    ? origRow.options[1]
+                    : origRow.options[0]
+            );
+        } else if (isUp) {
+            if (currentIdx < origRow.options.length - 1) currentIdx++;
+            origRow.value = String(origRow.options[currentIdx]);
+        } else {
+            if (currentIdx > 0) currentIdx--;
+            origRow.value = String(origRow.options[currentIdx]);
+        }
+        const payload = {};
+        if (origRow.id === 'main_row_fan') payload.fan = origRow.value;
+        if (origRow.id === 'main_row_sys') payload.sys = origRow.value;
+        if (typeof window.updateUI === 'function' && Object.keys(payload).length) window.updateUI(payload);
+    }
 }
 
 // Combined arrow key handler: handles both menu and redbox movement
@@ -858,6 +1102,8 @@ function handleArrowKey(e) {
         return;
     }
     let focusedIndex = typeof window._currentScreenFocus === 'number' ? window._currentScreenFocus : 0;
+    focusedIndex = ((focusedIndex % menuRows.length) + menuRows.length) % menuRows.length;
+    window._currentScreenFocus = focusedIndex;
 
     if (data.page === 'SETUP_MENU') {
         // Setup Menu logic: Up/Down moves focus, Right selects, Left goes back
@@ -886,6 +1132,26 @@ function handleArrowKey(e) {
             return;
         }
     } else {
+        // Home (MAIN_DISPLAY): Right cycles focus SET → FAN → SYS; Left opens setup menu; Up/Down reserved
+        if (data.page === 'MAIN_DISPLAY') {
+            if (e.key === 'ArrowRight') {
+                focusedIndex = (focusedIndex + 1) % menuRows.length;
+                window._currentScreenFocus = focusedIndex;
+                renderScreen(window._currentJsonPath);
+                return;
+            }
+            if (e.key === 'ArrowLeft') {
+                window.navigateTo('setup');
+                return;
+            }
+            if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                const origRow = data.widgets.find(w => w.type === 'menu_row' && w.id === menuRows[focusedIndex].id);
+                if (origRow) adjustMainHomeRowValue(origRow, e);
+                renderScreen(window._currentJsonPath);
+                return;
+            }
+            return;
+        }
         // Settings Pages Navigation Standard: 
         // Right arrow (NEXT) moves focus to the NEXT item (+1, visually DOWN the list)
         // Left arrow (BACK) exits the current screen and returns to the Setup Menu
@@ -920,8 +1186,6 @@ function handleArrowKey(e) {
                         newValue = String(origRow.options[0]);
                     }
                     origRow.value = newValue;
-                    // Immediately update the menuRows reversed cache as well (for UI sync)
-                    menuRows[focusedIndex].value = newValue;
                 } else if (origRow.options.length > 2 && e.key === 'ArrowUp') {
                     if (currentIdx < origRow.options.length - 1) currentIdx++;
                     origRow.value = String(origRow.options[currentIdx]);

@@ -1,7 +1,7 @@
 {
   "page": "CLOCK_SETTINGS",
   "styles": {
-    "bg": "#003366", "highlight": "#008080", "fontFamily": "'Fira Mono', 'Consolas', 'Menlo', 'Monaco', 'Liberation Mono', 'Courier New', monospace", "fontWeight": "900", "fontSize": "32px"
+    "bg": "#2c7cc4", "highlight": "#008080", "fontFamily": "'Fira Mono', 'Consolas', 'Menlo', 'Monaco', 'Liberation Mono', 'Courier New', monospace", "fontWeight": "900", "fontSize": "32px"
   },
   "layout": {
     "lcdCanvas": { "width": 320, "height": 480 },
@@ -10,8 +10,8 @@
     "valueColumnLayout": { "x": 160, "width": 160 },
     "menuRowPixelHeight": 48,
     "headerLayout": { "x": 160, "y": 40, "align": "center", "font": "FONT_18_BOLD" },
-    "footerLayout": { "x": 0, "y": 420, "width": 320, "height": 48 },
-    "footerTopPadding": 6, "buttonHorizontalGap": 6,
+    "footerLayout": { "x": 0, "y": 435, "width": 320, "height": 48 },
+    "footerTopPadding": 6, "footerBottomPadding": 10, "buttonGap": 6,
     "menuRowVerticalGap": 4, "valueBoxRightPadding": 20,
     "valueBoxLeftPadding": 12, "valueBoxTextAlign": "right",
     "menuRowLeftPadding": 20

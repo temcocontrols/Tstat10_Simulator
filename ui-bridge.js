@@ -8,7 +8,13 @@ function sendHwKey(key) {
     if (key === 'LEFT') arrowKey = 'ArrowLeft';
     if (key === 'RIGHT') arrowKey = 'ArrowRight';
     if (arrowKey) {
-        const event = new KeyboardEvent('keydown', { key: arrowKey, bubbles: true });
+        const codeMap = { ArrowUp: 'ArrowUp', ArrowDown: 'ArrowDown', ArrowLeft: 'ArrowLeft', ArrowRight: 'ArrowRight' };
+        const event = new KeyboardEvent('keydown', {
+            key: arrowKey,
+            code: codeMap[arrowKey] || arrowKey,
+            bubbles: true,
+            cancelable: true
+        });
         window.dispatchEvent(event);
     }
 }

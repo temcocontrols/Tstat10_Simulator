@@ -10,9 +10,19 @@ The Tstat10 Portable UI is a high-fidelity, zero-dependency HTML/JS simulator. I
 
 \## 2. Integration Ecosystem
 
-The simulator is designed to plug directly into the following Temco Controls platforms:
 
 
+## 2.1 Menu System Configuration Tools
+
+The project includes new tools for configuring the LCD (display) and menu system for both Tstat10 and Tstat11 thermostats. These tools allow users to:
+
+- Configure their own custom menu systems at runtime, directly on the device or through the simulator.
+- Modify and extend the stock menu system using the same interface.
+- Store resulting menu structures and behaviors on the device and in program files, enabling persistent, user-defined interfaces and logic.
+
+This approach provides maximum flexibility for HVAC control and user interface customization, supporting both out-of-the-box and advanced user scenarios.
+
+## 3. Technical Design (Minimalist/Portable)
 
 \### A. \[T3000 Building Automation System](https://github.com/temcocontrols/T3000\_Building\_Automation\_System)
 
@@ -82,5 +92,22 @@ Initial development and "mimicking" of the application occur in a standard web b
 
 \* \*\*Mock Messaging:\*\* Local JS event listeners simulate the data packets typically sent by the T3000 C++ backend.
 
-\* \*\*Visual Debugging:\*\* Browser DevTools are used to verify pixel-perfect alignment against
+\* \*\*Visual Debugging:\*\* Browser DevTools and the built-in Debug Panel overlays (Grid, Coords, Redbox) are used to verify pixel-perfect alignment against the hardware specifications.
 
+\---
+
+\## 5. JSON-Driven Dynamic UI & Routing
+
+The UI architecture relies on a data-driven, multi-screen model to facilitate rapid prototyping without firmware updates:
+\* \*\*State Management:\*\* `window._currentScreenData` maintains the active screen's configuration, parsed from discrete `.json` payloads.
+\* \*\*Dynamic Navigation:\*\* A central `window.navigateTo(screenName)` router transitions between screens (e.g., `main_display.json`, `network_settings.json`).
+\* \*\*LVGL-Style Widgets:\*\* Abstract JSON objects (`type: "header"`, `type: "menu_row"`, `type: "button"`) are mapped dynamically to absolute-positioned DOM elements at runtime.
+
+\---
+
+\## 6. Visual Edit Mode (WYSIWYG Engine)
+
+The simulator includes a comprehensive runtime visual editor, allowing users to build and tweak JSON layouts directly in the browser:
+\* \*\*Drag-and-Drop Elements:\*\* Easily reorder `menu_row` items vertically via a drag-and-drop interface.
+\* \*\*Inline Modifications:\*\* Modify text labels inline and adjust alignments/widths via context menus and scroll-wheel shortcuts.
+\* \*\*Persistence:\*\* Changes lock and save directly back to the source `.json` files via a local Node.js endpoint (`http://localhost:5001/save_settings`) or over the JS Bridge via the `save_settings` action.
