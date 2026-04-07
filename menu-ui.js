@@ -25,8 +25,8 @@ export function renderMenuRows(lcd, data, menuRowsFocusedIndex) {
     const valueBoxWidth = data.styles?.valueBoxWidthChars || 8;
     const baseFontSize = parseInt((data.styles?.fontSize || '22px').replace('px',''), 10) + 3;
     menuRowsData.forEach((widget, idx) => {
-        // Always get the current value from the global data (window._networkSettingsData)
-        let liveWidget = (window._networkSettingsData?.widgets || []).find(w => w.type === 'menu_row' && w.id === widget.id) || widget;
+        // Always get the current value from the global data (window._currentScreenData)
+        let liveWidget = (window._currentScreenData?.widgets || []).find(w => w.type === 'menu_row' && w.id === widget.id) || widget;
         const row = document.createElement('div');
         row.style.display = 'flex';
         row.style.justifyContent = 'space-between';
