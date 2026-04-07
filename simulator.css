@@ -3,6 +3,11 @@
     box-sizing: border-box;
 }
 
+/* Lens outline (JS appends .tstat-lens-outline to .device-bezel): flat top, rounded bottom corners only */
+.tstat-lens-outline {
+    border-radius: 0 0 var(--lcd-lens-bottom-radius) var(--lcd-lens-bottom-radius);
+}
+
 #tstat-lcd-container {
     /* Visually compress LCD vertically, but only halfway compared to previous */
     transform: scaleY(0.875);
@@ -37,7 +42,7 @@
     width: var(--lcd-lens-width);
     height: var(--lcd-lens-height);
     border: var(--lcd-lens-thickness) solid #c4c4c4; /* lens outline (if pseudo-elements enabled) */
-    border-radius: var(--lcd-radius);
+    border-radius: 0 0 var(--lcd-lens-bottom-radius) var(--lcd-lens-bottom-radius);
     pointer-events: none;
     z-index: 13;
     box-shadow: 0 2px 16px 0 rgba(255,255,255,0.12) inset;
@@ -64,8 +69,9 @@
     --lcd-lens-thickness: 6px; /* Standalone lens thickness */
     --lcd-lens-width: 432px;  /* Lens width: 50% wider */
     --lcd-lens-height: 717px; /* matches Math.round(484×1.3×1.2×0.95) in network-settings-renderer.js */
+    --lcd-lens-bottom-radius: 32px; /* bottom corners only; top is square */
     --lcd-lens-y: 0px; /* Vertical offset for lens positioning */
-    --lcd-background-color: #3498db; /* LCD background color */
+    --lcd-background-color: #2c7cc4; /* LCD background (matches screen JSON styles.bg) */
     --color2: #e67e22; /* Custom color 2 */
 }
 
@@ -134,7 +140,7 @@
         transform: translateX(-50%);
         width: 475px; /* 432px * 1.1 */
         height: 484px; /* 440px * 1.1 */
-        border-radius: 36px;
+        border-radius: 0 0 36px 36px; /* square top; bottom corners only */
         border: 2px solid #c4c4c4;
         background: transparent;
         z-index: 2;
@@ -221,4 +227,259 @@
 .hw-btn:active {
     box-shadow: 0 1px #999;
     transform: translateY(2px);
+}
+
+/* --- Debug panel (Tstat10.html) --- */
+.app-main-row {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: center;
+}
+
+.debug-panel-wrap {
+    margin-right: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.debug-panel {
+    position: absolute;
+    left: 20px;
+    top: 40px;
+    z-index: 10000;
+    width: 320px;
+    min-width: 300px;
+    max-width: 380px;
+    /* network-settings-renderer injects monospace on body; keep panel UI sans-serif */
+    font-family: system-ui, 'Segoe UI', Roboto, sans-serif !important;
+    font-size: 13px;
+    line-height: 1.35;
+    color: #1e293b;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    box-shadow:
+        0 4px 6px -1px rgba(15, 23, 42, 0.08),
+        0 12px 24px -4px rgba(15, 23, 42, 0.12);
+    cursor: default;
+    overflow: hidden;
+}
+
+.debug-panel__header {
+    cursor: grab;
+    user-select: none;
+    padding: 12px 16px;
+    background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+    border-bottom: 1px solid #e2e8f0;
+    font-weight: 600;
+    font-size: 13px;
+    letter-spacing: 0.02em;
+    color: #0f172a;
+}
+
+.debug-panel__header:active {
+    cursor: grabbing;
+}
+
+.debug-panel__body {
+    padding: 0 0 4px;
+    display: flex;
+    flex-direction: column;
+}
+
+.debug-panel__section {
+    padding: 12px 16px 14px;
+    border-top: 1px solid #f1f5f9;
+}
+
+.debug-panel__section:first-of-type {
+    border-top: none;
+}
+
+.debug-panel__section-title {
+    margin: 0 0 10px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: #64748b;
+}
+
+.debug-panel__row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 5px 0;
+    font-weight: 500;
+    color: #334155;
+    cursor: pointer;
+    user-select: none;
+}
+
+.debug-panel__row input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: #2563eb;
+}
+
+.debug-panel__redbox-tools {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 4px;
+    padding: 8px 10px;
+    background: #f8fafc;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+    font-size: 12px;
+}
+
+.debug-panel__redbox-label {
+    font-weight: 600;
+    color: #64748b;
+}
+
+.debug-panel__redbox-value {
+    font-weight: 600;
+    color: #2563eb;
+    font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace !important;
+    min-width: 2em;
+    font-size: 12px !important;
+}
+
+.debug-panel__btn-sm {
+    min-width: 36px;
+    height: 28px;
+    padding: 0 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #fff;
+    background: #2563eb;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.debug-panel__btn-sm:hover {
+    background: #1d4ed8;
+}
+
+.debug-panel__lcd-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 10px;
+}
+
+.debug-panel__lcd-grid label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #475569;
+}
+
+.debug-panel__lcd-grid input,
+.debug-panel__lcd-grid select {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    font: inherit;
+    box-sizing: border-box;
+    background: #fff;
+}
+
+.debug-panel__lcd-grid input:focus,
+.debug-panel__lcd-grid select:focus {
+    outline: none;
+    border-color: #2563eb;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+}
+
+.debug-panel__actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.debug-panel__actions button {
+    flex: 1;
+    padding: 8px 12px;
+    font-weight: 600;
+    font-size: 12px;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.debug-panel__actions #editor-apply-canvas {
+    background: #0f172a;
+    color: #fff;
+    border: 1px solid #0f172a;
+}
+
+.debug-panel__actions #editor-apply-canvas:hover {
+    background: #1e293b;
+}
+
+.debug-panel__actions #editor-validate {
+    background: #fff;
+    color: #334155;
+    border: 1px solid #cbd5e1;
+}
+
+.debug-panel__actions #editor-validate:hover {
+    background: #f8fafc;
+}
+
+.debug-panel__validation {
+    margin-top: 8px;
+    padding: 8px 10px;
+    max-height: 120px;
+    overflow: auto;
+    font-size: 11px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    background: #f8fafc;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+    color: #334155;
+    font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace !important;
+}
+
+.debug-panel__live {
+    margin: 0;
+    padding: 0;
+}
+
+.debug-panel__live-row {
+    display: grid;
+    grid-template-columns: 108px 1fr;
+    gap: 8px;
+    align-items: baseline;
+    padding: 5px 0;
+    font-size: 12px;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.debug-panel__live-row:last-child {
+    border-bottom: none;
+}
+
+.debug-panel__live-label {
+    font-weight: 600;
+    color: #64748b;
+}
+
+.debug-panel__live-value {
+    font-weight: 600;
+    color: #2563eb;
+    font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace !important;
+    font-size: 12px !important;
+    word-break: break-all;
 }

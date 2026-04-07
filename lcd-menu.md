@@ -20,7 +20,7 @@ The LCD menu system provides user interaction for temperature control, setpoint 
 - **Setup Menu**
   - Accessed by long-pressing the LEFT and RIGHT keypad buttons at the same time, or by pressing the 'S' key on the keypad.
   - Contains about 5 items, leading to various configuration pages:
-    - Ethernet Setup
+    - WiFi Setup
     - Clock
     - Outside Air Temp
     - RS485 Settings

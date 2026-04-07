@@ -1,7 +1,7 @@
 {
   "page": "SETUP_MENU",
   "styles": {
-    "bg": "#003366",
+    "bg": "#2c7cc4",
     "highlight": "#008080",
     "fontFamily": "'Fira Mono', 'Consolas', 'Menlo', 'Monaco', 'Liberation Mono', 'Courier New', monospace",
     "fontWeight": "900",
@@ -15,9 +15,10 @@
     "valueColumnLayout": { "x": 300, "width": 0 },
     "menuRowPixelHeight": 48,
     "headerLayout": { "x": 160, "y": 40, "align": "center", "font": "FONT_18_BOLD" },
-    "footerLayout": { "x": 0, "y": 420, "width": 320, "height": 48 },
+    "footerLayout": { "x": 0, "y": 435, "width": 320, "height": 48 },
     "footerTopPadding": 6,
-    "buttonGap": 17,
+    "footerBottomPadding": 10,
+    "buttonGap": 6,
     "menuRowLeftPadding": 20
   },
   "widgets": [
@@ -37,7 +38,7 @@
     {
       "type": "menu_row",
       "id": "ui_item_ethernet",
-      "label": "Ethernet Setup",
+      "label": "WiFi Setup",
       "value": "",
       "labelWidth": 240,
       "valueWidth": 10,

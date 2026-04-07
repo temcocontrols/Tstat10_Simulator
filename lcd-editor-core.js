@@ -21,7 +21,7 @@ export function ensureCanonicalSchema(data) {
 
     data.colorProfile.mode = data.colorProfile.mode || 'indexed';
     data.colorProfile.themeTokens = data.colorProfile.themeTokens || {
-        bg: data.styles?.bg || '#003366',
+        bg: data.styles?.bg || '#2c7cc4',
         text: '#ffffff',
         accent: data.styles?.highlight || '#008080'
     };

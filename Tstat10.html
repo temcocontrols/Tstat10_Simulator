@@ -11,78 +11,76 @@
         #app { max-width: 800px; margin: 40px auto; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.1); padding: 32px; border-radius: 8px; }
         h1 { color: #2c3e50; }
     </style>
+    <link rel="stylesheet" href="simulator.css">
+    <link rel="stylesheet" href="lcd-content.css">
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div id="app" style="position: relative; min-height: 600px;">
-        <div style="display: flex; flex-direction: row; align-items: flex-start; justify-content: center;">
-            <div id="debug-toggles" style="margin-right: 24px; display: flex; flex-direction: column; gap: 16px;">
-                <!-- Grid and Coords toggles moved to debug panel below -->
-                <div id="debug-event-panel" style="margin-top: 18px; background: #f7f7f7; border: 2px solid #888; border-radius: 10px; box-shadow: 0 2px 12px #0002; padding: 0; min-width: 320px; max-width: 320px; width: 320px; font-family: 'Fira Mono', 'Consolas', 'Menlo', 'Monaco', 'Liberation Mono', 'Courier New', monospace; font-size: 1.08em; color: #222; position: absolute; left: 20px; top: 40px; z-index: 10000; cursor: move;">
-                    <div id="debug-panel-title" style="background: #e0e0e0; border-bottom: 1px solid #bbb; border-radius: 8px 8px 0 0; font-weight: bold; font-size: 1.08em; padding: 8px 16px; cursor: move; user-select: none;">Tstat10 Debug</div>
-                    <div style="padding: 12px 18px; display: flex; flex-direction: column; gap: 0; align-items: flex-start; font-family: inherit; font-size: inherit;">
-                                                <label style="font-family: inherit; font-size: inherit; color: #333; font-weight: bold; margin-bottom: 10px; user-select: none; display: flex; flex-direction: row; align-items: center; justify-content: flex-start; width: 100%; margin-top: 10px;">
-                                                    <span style="flex:1; text-align: left;">Simulated Keypad</span>
-                                                    <input type="checkbox" id="toggle-autotester" style="margin-left: 8px;">
-                                                </label>
-                        <label style="font-family: inherit; font-size: inherit; color: #333; font-weight: bold; margin-bottom: 2px; user-select: none; display: flex; flex-direction: row; align-items: center; justify-content: flex-start; width: 100%;">
-                            <span style="flex:1; text-align: left;">Grid Layer</span>
-                            <input type="checkbox" id="toggle-grid-layer" checked style="margin-left: 8px;">
-                        </label>
-                        <label style="font-family: inherit; font-size: inherit; color: #333; font-weight: bold; margin-bottom: 2px; user-select: none; display: flex; flex-direction: row; align-items: center; justify-content: flex-start; width: 100%;">
-                            <span style="flex:1; text-align: left;">Coords</span>
-                            <input type="checkbox" id="toggle-coords" style="margin-left: 8px;">
-                        </label>
-                        <label style="font-family: inherit; font-size: inherit; color: #333; font-weight: bold; margin-bottom: 10px; user-select: none; display: flex; flex-direction: row; align-items: center; justify-content: flex-start; width: 100%;">
-                            <span style="flex:1; text-align: left;">Redbox</span>
-                            <input type="checkbox" id="toggle-redbox" style="margin-left: 8px;">
-                        </label>
-                        <div id="redbox-coords" style="margin: 0 0 10px 0; display: flex; gap: 8px; align-items: center; min-width: 120px;">
-                            <span style="font-weight: bold; color: #b00;">Redbox:</span>
-                            <span id="redbox-coords-value" style="font-weight: bold; color: #1976d2; margin-left: 8px;"></span>
-                            <button id="redbox-x-btn" style="width: 38px; min-width: 38px; max-width: 38px; height: 28px; font-family: inherit; font-size: 1em; font-weight: bold; color: #fff; background: #1976d2; border: none; border-radius: 6px;">X</button>
-                            <button id="redbox-y-btn" style="width: 38px; min-width: 38px; max-width: 38px; height: 28px; font-family: inherit; font-size: 1em; font-weight: bold; color: #fff; background: #1976d2; border: none; border-radius: 6px;">Y</button>
-                        </div>
-                        <div style="margin: 8px 0 10px 0; padding: 10px; width: 100%; box-sizing: border-box; border: 1px solid #bbb; border-radius: 8px; background: #fdfdfd;">
-                            <div style="font-weight: bold; margin-bottom: 8px;">LCD Editor (Phase 1)</div>
-                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
-                                <label>Width<input id="editor-canvas-width" type="number" value="320" style="width: 100%;"></label>
-                                <label>Height<input id="editor-canvas-height" type="number" value="480" style="width: 100%;"></label>
+        <div class="app-main-row">
+            <div id="debug-toggles" class="debug-panel-wrap">
+                <div id="debug-event-panel" class="debug-panel">
+                    <div id="debug-panel-title" class="debug-panel__header">Tstat10 Debug</div>
+                    <div class="debug-panel__body">
+                        <section class="debug-panel__section" aria-label="Display overlays">
+                            <h3 class="debug-panel__section-title">Overlays</h3>
+                            <label class="debug-panel__row"><span>Grid layer</span><input type="checkbox" id="toggle-grid-layer" checked></label>
+                            <label class="debug-panel__row"><span>Coords</span><input type="checkbox" id="toggle-coords"></label>
+                            <label class="debug-panel__row"><span>Redbox</span><input type="checkbox" id="toggle-redbox"></label>
+                            <div id="redbox-coords" class="debug-panel__redbox-tools">
+                                <span class="debug-panel__redbox-label">Position</span>
+                                <span id="redbox-coords-value" class="debug-panel__redbox-value"></span>
+                                <button type="button" id="redbox-x-btn" class="debug-panel__btn-sm" title="Adjust X">X</button>
+                                <button type="button" id="redbox-y-btn" class="debug-panel__btn-sm" title="Adjust Y">Y</button>
+                            </div>
+                        </section>
+                        <section class="debug-panel__section" aria-label="Simulation">
+                            <h3 class="debug-panel__section-title">Simulation</h3>
+                            <label class="debug-panel__row"><span>Auto keypad test</span><input type="checkbox" id="toggle-autotester"></label>
+                        </section>
+                        <section class="debug-panel__section debug-panel__section--lcd" aria-label="LCD editor">
+                            <h3 class="debug-panel__section-title">LCD editor</h3>
+                            <div class="debug-panel__lcd-grid">
+                                <label>Width <input id="editor-canvas-width" type="number" value="320"></label>
+                                <label>Height <input id="editor-canvas-height" type="number" value="480"></label>
                                 <label>Orientation
-                                    <select id="editor-orientation" style="width: 100%;">
+                                    <select id="editor-orientation">
                                         <option value="vertical">vertical</option>
                                         <option value="horizontal">horizontal</option>
                                     </select>
                                 </label>
-                                <label>Color Mode
-                                    <select id="editor-color-mode" style="width: 100%;">
+                                <label>Color mode
+                                    <select id="editor-color-mode">
                                         <option value="indexed">indexed</option>
                                         <option value="reduced_rgb">reduced_rgb</option>
                                     </select>
                                 </label>
                             </div>
-                            <div style="display: flex; gap: 8px; margin-top: 8px;">
-                                <button id="editor-apply-canvas" style="flex: 1;">Apply</button>
-                                <button id="editor-validate" style="flex: 1;">Validate</button>
+                            <div class="debug-panel__actions">
+                                <button type="button" id="editor-apply-canvas">Apply</button>
+                                <button type="button" id="editor-validate">Validate</button>
                             </div>
-                            <pre id="editor-validation-result" style="white-space: pre-wrap; font-size: 12px; margin-top: 8px; max-height: 120px; overflow: auto;"></pre>
-                        </div>
-                        </label>
-                        <div id="keypad-debug-subpanel" style="margin: 18px 0 16px 32px; padding: 10px 0 10px 18px; border-left: 4px solid #bbb; background: #f7f7f7; border-radius: 8px; font-family: inherit; font-size: inherit; color: #222;">
-                            <div id="keypad-debug-content">
-                                <div style="display: flex; flex-direction: row; align-items: center; margin-bottom: 6px; font-family: inherit; font-size: inherit; justify-content: flex-start;">
-                                    <span style="font-weight: bold; width: 120px; min-width: 120px; max-width: 120px; color: #333; display: inline-block;">Keypad Event:</span>
-                                    <span id="debug-event-value" style="width: 120px; min-width: 120px; max-width: 120px; height: 32px; font-family: inherit; font-size: 1em; font-weight: bold; color: #1976d2; background: none; border: none; border-radius: 6px; text-align: left; margin-left: 12px; display: inline-block;">&nbsp;</span>
-                                </div>
-                                <div style="display: flex; flex-direction: row; align-items: center; margin-bottom: 6px; font-family: inherit; font-size: inherit; justify-content: flex-start;">
-                                    <span style="font-weight: bold; width: 120px; min-width: 120px; max-width: 120px; color: #333; display: inline-block;">LCD Focus:</span>
-                                    <span id="debug-focus-value" style="width: 120px; min-width: 120px; max-width: 120px; height: 32px; font-family: inherit; font-size: 1em; font-weight: bold; color: #1976d2; background: none; border: none; border-radius: 6px; text-align: left; margin-left: 12px; display: inline-block;">&nbsp;</span>
-                                </div>
-                                <div style="display: flex; flex-direction: row; align-items: center; font-family: inherit; font-size: inherit; justify-content: flex-start;">
-                                    <span style="font-weight: bold; width: 120px; min-width: 120px; max-width: 120px; color: #333; display: inline-block;">Focus Value:</span>
-                                    <span id="debug-value-value" style="width: 120px; min-width: 120px; max-width: 120px; height: 32px; font-family: inherit; font-size: 1em; font-weight: bold; color: #1976d2; background: none; border: none; border-radius: 6px; text-align: left; margin-left: 12px; display: inline-block;">&nbsp;</span>
+                            <pre id="editor-validation-result" class="debug-panel__validation"></pre>
+                        </section>
+                        <section class="debug-panel__section" aria-label="Live state">
+                            <h3 class="debug-panel__section-title">Live state</h3>
+                            <div id="keypad-debug-subpanel" class="debug-panel__live">
+                                <div id="keypad-debug-content">
+                                    <div class="debug-panel__live-row">
+                                        <span class="debug-panel__live-label">Keypad event</span>
+                                        <span id="debug-event-value" class="debug-panel__live-value">&nbsp;</span>
+                                    </div>
+                                    <div class="debug-panel__live-row">
+                                        <span class="debug-panel__live-label">LCD focus</span>
+                                        <span id="debug-focus-value" class="debug-panel__live-value">&nbsp;</span>
+                                    </div>
+                                    <div class="debug-panel__live-row">
+                                        <span class="debug-panel__live-label">Focus value</span>
+                                        <span id="debug-value-value" class="debug-panel__live-value">&nbsp;</span>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
+                        </section>
                     </div>
                 </div>
                 <script>
@@ -230,9 +228,6 @@
                 </div>
             </div>
         </div>
-            <link rel="stylesheet" href="simulator.css">
-            <link rel="stylesheet" href="lcd-content.css">
-            <link rel="stylesheet" href="style.css">
             <script type="module" src="network-settings-renderer.js?v=20260207c"></script>
             <script src="lcd-content.js"></script>
             <!-- Logic moved to ui-bridge.js for CSP compliance -->
