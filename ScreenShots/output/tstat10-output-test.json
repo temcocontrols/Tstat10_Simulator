@@ -1,0 +1,102 @@
+{
+  "page": "SCREEN_NAME",
+  "schemaVersion": "1.0.0",
+
+  "canvasProfile": {
+    "width": 320,
+    "height": 480,
+    "orientation": "vertical"
+  },
+
+  "colorProfile": {
+    "mode": "indexed",
+    "themeTokens": {
+      "bg": "#2c7cc4",
+      "text": "#ffffff",
+      "accent": "#008080"
+    }
+  },
+
+  "styles": {
+    "bg": "#2c7cc4",
+    "highlight": "#008080",
+    "fontFamily": "'Fira Mono', 'Consolas', monospace",
+    "fontWeight": "900",
+    "fontSize": "32px"
+  },
+
+  "layout": {
+    "lcdCanvas": { "width": 320, "height": 480 },
+    "canvas": { "width": 320, "height": 480 },
+    "lcdTextRows": 10,
+    "lcdTextColumns": 16,
+    "menuRowPixelHeight": 48,
+    "rowLeftPadding": 20,
+    "labelColumnLayout": { "x": 20, "width": 120 },
+    "valueColumnLayout": { "x": 160, "width": 160 },
+    "headerLayout": { "x": 160, "y": 40, "align": "center", "font": "FONT_18_BOLD" },
+    "footerLayout": { "x": 0, "y": 435, "width": 320, "height": 48 },
+    "menuRowVerticalGap": 4,
+    "valueBoxRightPadding": 20,
+    "valueBoxLeftPadding": 12,
+    "valueBoxTextAlign": "right",
+    "buttonGap": 6
+  },
+
+  "compatibility": {
+    "targets": ["tstat10"]
+  },
+
+  "widgets": [
+    { "type": "blank", "lcdRow": 1 },
+    {
+      "type": "header",
+      "text": "Screen Title",
+      "align": "center",
+      "font": "FONT_18_BOLD",
+      "lcdRow": 2
+    },
+    {
+      "type": "menu_row",
+      "id": "ui_item_baud",
+      "label": "Baud",
+      "register": 7,
+      "value": 9600,
+      "options": [9600, 19200, 38400, 115200],
+      "step": 0.5,
+      "min": 0,
+      "max": 247,
+      "is_focused": true,
+      "labelWidth": 140,
+      "valueWidth": 130,
+      "valueId": "baud_val",
+      "longValue": true,
+      "lcdRow": 5,
+      "homeRow": "setpoint",
+      "notes": "descriptive note"
+    },
+    {
+      "type": "label",
+      "id": "my_label",
+      "text": "Hello World",
+      "x": 160,
+      "y": 52,
+      "align": "center",
+      "color": "#ffffff",
+      "font": "15px system-ui",
+      "width": 320,
+      "wrap": true
+    },
+    {
+      "type": "button",
+      "id": "btn_back",
+      "label": "BACK",
+      "width": 92,
+      "height": 45,
+      "font": "32px 'Fira Mono', monospace",
+      "lcdRow": 9
+    },
+    { "type": "footer_hint", "text": "  +  Edit  -  " },
+    { "type": "footer_nav", "text": "< Left   Right >" }
+  ]
+}
