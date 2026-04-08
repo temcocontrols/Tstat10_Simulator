@@ -24,6 +24,31 @@ import { setupDebugToggles } from './debug-toggles.js';
 import { updateDebugPanel } from './debug-panel-fixed.js';
 import { ensureCanonicalSchema, validateLayoutData, writeStatus } from './lcd-editor-core.js';
 
+const SIMULATED_LR_LONG_PRESS_MS = 900;
+let _leftRightLongPressTimer = null;
+let _leftArrowDown = false;
+let _rightArrowDown = false;
+
+function clearLeftRightLongPressTimer() {
+    if (_leftRightLongPressTimer) {
+        clearTimeout(_leftRightLongPressTimer);
+        _leftRightLongPressTimer = null;
+    }
+}
+
+function tryStartLeftRightLongPressTimer() {
+    if (!_leftArrowDown || !_rightArrowDown || _leftRightLongPressTimer) return;
+    _leftRightLongPressTimer = setTimeout(() => {
+        _leftRightLongPressTimer = null;
+        if (_leftArrowDown && _rightArrowDown) {
+            const page = window._currentScreenData && window._currentScreenData.page;
+            if (page === 'MAIN_DISPLAY') {
+                window.navigateTo('setup');
+            }
+        }
+    }, SIMULATED_LR_LONG_PRESS_MS);
+}
+
 /** Escape text for safe insertion into innerHTML */
 function escapeHtml(s) {
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -922,18 +947,24 @@ export async function renderScreen(jsonPath) {
         } else if (widget.id === 'btn_next') {
             btn.style.cursor = 'pointer';
             btn.addEventListener('click', () => {
+                const menuRows = getMenuRows(data);
+                if (!menuRows.length) return;
+                let focusIdx = typeof window._currentScreenFocus === 'number' ? window._currentScreenFocus : 0;
+                focusIdx = ((focusIdx % menuRows.length) + menuRows.length) % menuRows.length;
                 if (data.page === 'SETUP_MENU') {
-                    const menuRows = (data.widgets || []).filter(w => w.type === 'menu_row').sort((a, b) => (a.lcdRow || 1) - (b.lcdRow || 1));
-                    const focusIdx = typeof window._currentScreenFocus === 'number' ? window._currentScreenFocus : 0;
-                    const focusedRow = menuRows[focusIdx];
-                    if (focusedRow) {
-                        if (focusedRow.id === 'ui_item_rs485') window.navigateTo('settings');
-                        else if (focusedRow.id === 'ui_item_ethernet') window.navigateTo('ethernet');
-                        else if (focusedRow.id === 'ui_item_clock') window.navigateTo('clock');
-                        else if (focusedRow.id === 'ui_item_oat') window.navigateTo('oat');
-                        else if (focusedRow.id === 'ui_item_tbd') window.navigateTo('tbd');
-                    }
+                    openSetupFocusedRow(menuRows, focusIdx);
+                    return;
                 }
+                if (data.page === 'MAIN_DISPLAY') {
+                    // Home screen NEXT behavior: cycle focused parameter row.
+                    focusIdx = (focusIdx + 1) % menuRows.length;
+                    window._currentScreenFocus = focusIdx;
+                    renderScreen(window._currentJsonPath);
+                    return;
+                }
+                focusIdx = advanceFocusByRight(data, menuRows, focusIdx);
+                window._currentScreenFocus = focusIdx;
+                renderScreen(window._currentJsonPath);
             });
         }
 
@@ -1074,8 +1105,45 @@ function adjustMainHomeRowValue(origRow, e) {
     }
 }
 
+function getMenuRows(data) {
+    return (data.widgets || [])
+        .filter(w => w.type === 'menu_row')
+        .sort((a, b) => (a.lcdRow || 1) - (b.lcdRow || 1));
+}
+
+function openSetupFocusedRow(menuRows, focusedIndex) {
+    const focusedRow = menuRows[focusedIndex];
+    if (!focusedRow) return;
+    if (focusedRow.id === 'ui_item_rs485') window.navigateTo('settings');
+    else if (focusedRow.id === 'ui_item_ethernet') window.navigateTo('ethernet');
+    else if (focusedRow.id === 'ui_item_clock') window.navigateTo('clock');
+    else if (focusedRow.id === 'ui_item_oat') window.navigateTo('oat');
+    else if (focusedRow.id === 'ui_item_tbd') window.navigateTo('tbd');
+}
+
+function advanceFocusByRight(data, menuRows, focusedIndex) {
+    if (!menuRows.length) return focusedIndex;
+    const focusedRow = menuRows[focusedIndex];
+    // WIFI IP edit mode: Right moves to next octet instead of next row.
+    if (data.page === 'WIFI_SETTINGS' && focusedRow && focusedRow.id === 'ui_item_ip') {
+        const currentOctet = Number(window._ipEditOctetIndex || 0);
+        window._ipEditOctetIndex = (currentOctet + 1) % 4;
+        return focusedIndex;
+    }
+    window._ipEditOctetIndex = 0;
+    return (focusedIndex + 1) % menuRows.length;
+}
+
 // Combined arrow key handler: handles both menu and redbox movement
 function handleArrowKey(e) {
+    if (e.key === 'ArrowLeft') {
+        _leftArrowDown = true;
+        tryStartLeftRightLongPressTimer();
+    } else if (e.key === 'ArrowRight') {
+        _rightArrowDown = true;
+        tryStartLeftRightLongPressTimer();
+    }
+
     // Try redbox movement first (only up/down)
     if (handleRedboxArrowKey(e)) return;
     window._tstatLastEvent = e.key;
@@ -1097,7 +1165,7 @@ function handleArrowKey(e) {
     if (!data) return;
 
     // Only handle menu navigation on screens with menu rows
-    const menuRows = (data.widgets || []).filter(w => w.type === 'menu_row').sort((a, b) => (a.lcdRow || 1) - (b.lcdRow || 1));
+    const menuRows = getMenuRows(data);
     if (menuRows.length === 0) {
         return;
     }
@@ -1110,22 +1178,20 @@ function handleArrowKey(e) {
         if (e.key === 'ArrowUp') {
             focusedIndex = (focusedIndex - 1 + menuRows.length) % menuRows.length;
             window._currentScreenFocus = focusedIndex;
+            window._ipEditOctetIndex = 0;
             renderScreen(window._currentJsonPath);
             return;
         } else if (e.key === 'ArrowDown') {
             focusedIndex = (focusedIndex + 1) % menuRows.length;
             window._currentScreenFocus = focusedIndex;
+            window._ipEditOctetIndex = 0;
             renderScreen(window._currentJsonPath);
             return;
-        } else if (e.key === 'ArrowRight' || e.key === 'Enter') {
-            const focusedRow = menuRows[focusedIndex];
-            if (focusedRow) {
-                if (focusedRow.id === 'ui_item_rs485') window.navigateTo('settings');
-                else if (focusedRow.id === 'ui_item_ethernet') window.navigateTo('ethernet');
-                else if (focusedRow.id === 'ui_item_clock') window.navigateTo('clock');
-                else if (focusedRow.id === 'ui_item_oat') window.navigateTo('oat');
-                else if (focusedRow.id === 'ui_item_tbd') window.navigateTo('tbd');
-            }
+        } else if (e.key === 'ArrowRight') {
+            openSetupFocusedRow(menuRows, focusedIndex);
+            return;
+        } else if (e.key === 'Enter') {
+            openSetupFocusedRow(menuRows, focusedIndex);
             return;
         } else if (e.key === 'ArrowLeft') {
             window.navigateTo('main');
@@ -1135,7 +1201,7 @@ function handleArrowKey(e) {
         // Home (MAIN_DISPLAY): Right cycles focus SET → FAN → SYS; Left opens setup menu; Up/Down reserved
         if (data.page === 'MAIN_DISPLAY') {
             if (e.key === 'ArrowRight') {
-                focusedIndex = (focusedIndex + 1) % menuRows.length;
+                focusedIndex = advanceFocusByRight(data, menuRows, focusedIndex);
                 window._currentScreenFocus = focusedIndex;
                 renderScreen(window._currentJsonPath);
                 return;
@@ -1156,8 +1222,7 @@ function handleArrowKey(e) {
         // Right arrow (NEXT) moves focus to the NEXT item (+1, visually DOWN the list)
         // Left arrow (BACK) exits the current screen and returns to the Setup Menu
         if (e.key === 'ArrowRight') {
-            // Move focus DOWN: top → bottom (forward order)
-            focusedIndex = (focusedIndex + 1) % menuRows.length;
+            focusedIndex = advanceFocusByRight(data, menuRows, focusedIndex);
             window._currentScreenFocus = focusedIndex;
             renderScreen(window._currentJsonPath);
             return;
@@ -1203,8 +1268,10 @@ function handleArrowKey(e) {
             } else if (origRow.id === 'ui_item_ip') {
                 let parts = String(origRow.value).split('.').map(Number);
                 if (parts.length === 4) {
-                    if (e.key === 'ArrowUp') parts[3] = (parts[3] + 1) % 256;
-                    else parts[3] = (parts[3] - 1 + 256) % 256;
+                    let octetIndex = Number(window._ipEditOctetIndex || 0);
+                    if (Number.isNaN(octetIndex) || octetIndex < 0 || octetIndex > 3) octetIndex = 0;
+                    if (e.key === 'ArrowUp') parts[octetIndex] = (parts[octetIndex] + 1) % 256;
+                    else parts[octetIndex] = (parts[octetIndex] - 1 + 256) % 256;
                     origRow.value = parts.join('.');
                 }
             }
@@ -1219,8 +1286,36 @@ if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
         window.navigateTo('main');
         window.addEventListener('keydown', handleArrowKey);
+        window.addEventListener('keyup', (e) => {
+            if (e.key === 'ArrowLeft') {
+                _leftArrowDown = false;
+                clearLeftRightLongPressTimer();
+            } else if (e.key === 'ArrowRight') {
+                _rightArrowDown = false;
+                clearLeftRightLongPressTimer();
+            }
+        });
+        window.addEventListener('blur', () => {
+            _leftArrowDown = false;
+            _rightArrowDown = false;
+            clearLeftRightLongPressTimer();
+        });
     });
 } else {
     window.navigateTo('main');
     window.addEventListener('keydown', handleArrowKey);
+    window.addEventListener('keyup', (e) => {
+        if (e.key === 'ArrowLeft') {
+            _leftArrowDown = false;
+            clearLeftRightLongPressTimer();
+        } else if (e.key === 'ArrowRight') {
+            _rightArrowDown = false;
+            clearLeftRightLongPressTimer();
+        }
+    });
+    window.addEventListener('blur', () => {
+        _leftArrowDown = false;
+        _rightArrowDown = false;
+        clearLeftRightLongPressTimer();
+    });
 }
