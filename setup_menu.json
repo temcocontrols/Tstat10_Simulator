@@ -41,7 +41,7 @@
       "label": "WiFi Setup",
       "value": "",
       "labelWidth": 240,
-      "valueWidth": 10,
+      "valueWidth": 30,
       "lcdRow": 3
     },
     {
@@ -50,7 +50,7 @@
       "label": "Clock",
       "value": "",
       "labelWidth": 240,
-      "valueWidth": 10,
+      "valueWidth": 30,
       "lcdRow": 4
     },
     {
@@ -59,8 +59,17 @@
       "label": "Outside Air Temp",
       "value": "",
       "labelWidth": 240,
-      "valueWidth": 10,
+      "valueWidth": 30,
       "lcdRow": 5
+    },
+    {
+      "type": "menu_row",
+      "id": "ui_item_provisioning",
+      "label": "Provisioning",
+      "value": "",
+      "labelWidth": 240,
+      "valueWidth": 30,
+      "lcdRow": 6
     },
     {
       "type": "menu_row",
@@ -68,8 +77,8 @@
       "label": "RS485 Settings",
       "value": "",
       "labelWidth": 240,
-      "valueWidth": 10,
-      "lcdRow": 6
+      "valueWidth": 30,
+      "lcdRow": 7
     },
     {
       "type": "menu_row",
@@ -77,8 +86,8 @@
       "label": "To Be Done",
       "value": "",
       "labelWidth": 240,
-      "valueWidth": 10,
-      "lcdRow": 7
+      "valueWidth": 30,
+      "lcdRow": 8
     },
     {
       "type": "button",

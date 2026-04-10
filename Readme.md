@@ -17,6 +17,10 @@ The simulator now includes an initial LCD editor panel in the debug UI:
 - Set color mode (`indexed` or `reduced_rgb`)
 - Apply settings to the active screen JSON in memory
 - Run phase-1 validation checks for Tstat10-safe constraints
+-Review Squareline tool, use it for inspiration of our editor. 
+-We will not export to C code as squareline does, we will export to Jason 
+  and freom there we will convert it to binary blob to send to the Tstat for rendering. 
+  Next step, need to implement the renderer in C code on board the Tstat10 / 11. 
 
 \## Quick Start
 

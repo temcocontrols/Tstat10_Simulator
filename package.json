@@ -1,0 +1,8 @@
+{
+  "name": "tstat10-simulator",
+  "private": true,
+  "scripts": {
+    "start": "node tools/dev-server.mjs",
+    "dev": "node tools/dev-server.mjs"
+  }
+}

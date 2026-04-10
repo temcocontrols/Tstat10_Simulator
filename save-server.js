@@ -20,7 +20,7 @@ const server = http.createServer((req, res) => {
     if (req.method === 'POST' && req.url.startsWith('/save_settings')) {
         const requestUrl = new URL(req.url, `http://${req.headers.host}`);
         const fileName = requestUrl.searchParams.get('file');
-        const allowedFiles = ['network_settings.json', 'main_display.json', 'setup_menu.json', 'ethernet_setup.json', 'clock_setup.json', 'oat_setup.json', 'tbd_setup.json'];
+        const allowedFiles = ['network_settings.json', 'main_display.json', 'setup_menu.json', 'ethernet_setup.json', 'provisioning_setup.json', 'clock_setup.json', 'oat_setup.json', 'tbd_setup.json'];
 
         if (!fileName || !allowedFiles.includes(fileName)) {
             console.error(`[SAVE ERROR] Attempt to write to an invalid or unspecified file: ${fileName}`);

@@ -1,0 +1,20 @@
+
+In this video, I'm gonna show you the basics of SquareLine Studio. I'm going to explain how to load a project, and you'll get to know the layout structure of the editor. 
+
+**WE can skip this part for now: 
+Having started the program, the launcher screen will appear. Here, you can load a previously saved project, you can create one, or load an example. You can do these things in the menu on top of the launcher screen. In open menu, you can see the list of previously loaded projects in order. By choosing one, you can find information
+
+of the selected project in the side panel. You can open the particular project by using double click or clicking on the "Open selected project" button. 
+
+
+
+**We start here: 
+The screens of the selected project appear in the center of the editor, in the screen view area. You can pan the view by dragging with the middle button on the mouse. You can zoom in or out by using the mouse wheel. We can select and move the widgets on the screen by clicking on the left mouse button. A blue frame will appear around the selected widget, and you can scale
+
+it by using the bullets on the sides. When you click the right mouse button on the screen, a list appears with the widgets on that particular point. Here, you can easily choose the widget that you would like to select. 
+
+The layout of SquareLine Studio is built up from freely movable panels. It means you can arrange or organize these panels as you wish. There are three main panels, widget, hierarchy, and inspector panels. In widget panel, you can find widgets. You can click on them or drag them to a screen in order to create them. 
+
+In hierarchy panel, you can find the screens and the widgets inside the screens in hierarchical order. We can change widget order by clicking on the left mouse button. You can drag a widget inside another one. By doing this, the parameters of the parent widget will affect the parameters of the child. For example, when we move the parent, the child will move as well, or by setting style parameters on the parent, some style properties will be inherited
+
+by the child. In inspector panel, there are the parameters of the selected widget. You can change its position, size, alignment, and the status of the flags and states. You can also add custom styles and events here. 
