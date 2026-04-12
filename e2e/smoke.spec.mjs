@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { defaultStartupJsonBasename } from './registry-helper.mjs';
 
 test.describe('Simulator shell', () => {
     test('Tstat10 loads, LCD mount visible, no console/page errors', async ({ page }) => {
@@ -20,6 +21,6 @@ test.describe('Simulator shell', () => {
         await page.goto('/Tstat10.html', { waitUntil: 'domcontentloaded' });
         /* Top bar can be CSS-hidden in narrow viewports; still must exist in DOM. */
         await expect(page.locator('.sls-topbar__brand')).toHaveCount(1, { timeout: 45_000 });
-        await expect(page.locator('.sls-assets-strip')).toContainText('main_display.json');
+        await expect(page.locator('.sls-assets-strip')).toContainText(defaultStartupJsonBasename());
     });
 });

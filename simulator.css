@@ -60,6 +60,10 @@ body.visual-edit-shell .tstat-lcd-edge-strip--e {
     cursor: grab;
 }
 
+body.visual-edit-shell .tstat-lcd-edge-layer--locked .tstat-lcd-edge-strip {
+    cursor: not-allowed;
+}
+
 /* Reference photo: receive clicks in layout edit so it can be selected like other shell objects */
 body.visual-edit-shell #tstat-container .ref-photo-layer.ref-photo--visible {
     pointer-events: auto;
@@ -1168,6 +1172,36 @@ body.visual-edit-shell #tstat-container .ref-photo-layer.ref-photo--visible {
     margin-top: 2px;
 }
 
+.layout-props-screen-section__bg-palette-hint {
+    width: 100%;
+    flex-basis: 100%;
+    font-size: 11px;
+    line-height: 1.35;
+    color: #64748b;
+    margin: 2px 0 0;
+}
+
+.layout-props-screen-section__bg-swatch-add {
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 2px dashed #94a3b8;
+    border-radius: 4px;
+    background: transparent;
+    cursor: pointer;
+    box-sizing: border-box;
+    flex-shrink: 0;
+    font-size: 15px;
+    line-height: 1;
+    color: #64748b;
+}
+
+.layout-props-screen-section__bg-swatch-add:hover {
+    border-color: #0f172a;
+    color: #0f172a;
+    background: rgba(148, 163, 184, 0.15);
+}
+
 .layout-props-screen-section__bg-swatch {
     width: 22px;
     height: 22px;
@@ -1421,6 +1455,133 @@ body.visual-edit-shell #tstat-container .ref-photo-layer.ref-photo--visible {
     font-size: 12px;
 }
 
+/* Font Manager (inspector tab) — screen-wide styles.* */
+.layout-props-font-panel__intro {
+    margin: 0 0 10px;
+    font-size: 11px;
+    line-height: 1.45;
+    color: #475569;
+}
+
+.layout-props-font-panel__intro code {
+    font-size: 10px;
+}
+
+.layout-props-font-panel__field {
+    margin-bottom: 10px;
+}
+
+.layout-props-font-panel__field label {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    color: #334155;
+    margin-bottom: 4px;
+}
+
+.layout-props-font-panel__field textarea {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 64px;
+    padding: 6px 8px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    font-size: 11px;
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+    resize: vertical;
+}
+
+.layout-props-font-panel__presets {
+    margin: 12px 0 10px;
+    padding-top: 8px;
+    border-top: 1px solid #e2e8f0;
+}
+
+.layout-props-font-panel__presets-label {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    color: #334155;
+    margin-bottom: 6px;
+}
+
+.layout-props-font-panel__preset-btns {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.layout-props-font-panel__preset {
+    padding: 4px 10px;
+    font-size: 11px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    background: #f8fafc;
+    cursor: pointer;
+    color: #0f172a;
+}
+
+.layout-props-font-panel__preset:hover {
+    background: #e2e8f0;
+}
+
+.layout-props-font-panel__preview-wrap {
+    margin: 10px 0;
+}
+
+.layout-props-font-panel__preview-label {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    color: #334155;
+    margin-bottom: 4px;
+}
+
+.layout-props-font-panel__preview {
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+    color: #e2e8f0;
+    border: 1px solid #334155;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    letter-spacing: 0.02em;
+}
+
+.layout-props-font-panel__actions {
+    margin-top: 10px;
+}
+
+.layout-props-font-panel__apply {
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 6px;
+    border: 1px solid #0f766e;
+    background: #0d9488;
+    color: #fff;
+    cursor: pointer;
+}
+
+.layout-props-font-panel__apply:hover {
+    background: #0f766e;
+}
+
+.layout-props-font-panel__hint {
+    margin: 10px 0 0;
+    font-size: 10px;
+    line-height: 1.4;
+    color: #64748b;
+}
+
+.layout-props-tab-panel-other__text {
+    margin: 0;
+    font-size: 12px;
+    color: #64748b;
+    line-height: 1.5;
+}
+
 .layout-props-row {
     display: grid;
     grid-template-columns: 120px 1fr;
@@ -1577,6 +1738,25 @@ body.visual-edit-shell #tstat-container .ref-photo-layer.ref-photo--visible {
 
 .layout-tree-node__status.is-warning {
     background: #ef4444;
+}
+
+/* LCD outline row: locked replaces green status dot (Explorer-style cue). */
+.layout-tree-node__status.layout-tree-node__status--lcd-locked {
+    width: 12px;
+    height: 12px;
+    border-radius: 0;
+    background: transparent;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #fbbf24;
+}
+
+.layout-tree-node__status.layout-tree-node__status--lcd-locked svg {
+    width: 11px;
+    height: 11px;
+    display: block;
 }
 
 .layout-tree-node--pulse {
@@ -2594,6 +2774,25 @@ body.visual-edit-shell .layout-props-screen-section__bg-swatch.is-active {
     box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.35);
 }
 
+body.visual-edit-shell .layout-props-screen-section__bg-palette-hint {
+    color: #94a3b8;
+}
+
+body.visual-edit-shell .layout-props-screen-section__bg-swatch--custom {
+    box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.12);
+}
+
+body.visual-edit-shell .layout-props-screen-section__bg-swatch-add {
+    border-color: #4b5568;
+    color: #94a3b8;
+}
+
+body.visual-edit-shell .layout-props-screen-section__bg-swatch-add:hover {
+    border-color: #94a3b8;
+    color: #e2e8f0;
+    background: rgba(148, 163, 184, 0.12);
+}
+
 body.visual-edit-shell .layout-props-screen-section__bg-row input[type="color"] {
     background: #101319;
     border-color: #3b4250;
@@ -2662,6 +2861,37 @@ body.visual-edit-shell .layout-props-actions button {
     border-radius: 4px;
 }
 
+body.visual-edit-shell .layout-props-font-panel__intro,
+body.visual-edit-shell .layout-props-font-panel__hint {
+    color: #94a3b8;
+}
+
+body.visual-edit-shell .layout-props-font-panel__field label,
+body.visual-edit-shell .layout-props-font-panel__presets-label,
+body.visual-edit-shell .layout-props-font-panel__preview-label {
+    color: #b8c5d9;
+}
+
+body.visual-edit-shell .layout-props-font-panel__field textarea {
+    background: #101319;
+    border-color: #3b4250;
+    color: #dbe4f3;
+}
+
+body.visual-edit-shell .layout-props-font-panel__preset {
+    background: #252525;
+    border-color: #3b4250;
+    color: #e2e8f0;
+}
+
+body.visual-edit-shell .layout-props-font-panel__preset:hover {
+    background: #2d3544;
+}
+
+body.visual-edit-shell .layout-props-tab-panel-other__text {
+    color: #94a3b8;
+}
+
 body.visual-edit-shell .sls-assets-strip {
     display: flex;
     align-items: center;
@@ -2671,6 +2901,10 @@ body.visual-edit-shell .sls-assets-strip {
     border-top: 1px solid var(--sls-panel-border);
     overflow-x: auto;
     white-space: nowrap;
+}
+
+body.visual-edit-shell .sls-assets-strip__registry-chips {
+    display: contents;
 }
 
 body.visual-edit-shell .sls-assets-strip__title {

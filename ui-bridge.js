@@ -37,7 +37,7 @@ function persistShellRefPhoto() {
                 src: img.src || ''
             })
         );
-    } catch (_) {}
+    } catch {}
 }
 
 function restoreShellRefPhoto() {
@@ -55,7 +55,7 @@ function restoreShellRefPhoto() {
             img.style.display = 'block';
             img.classList.add('ref-photo--visible');
         }
-    } catch (_) {}
+    } catch {}
 }
 
 function toggleRef(base64Data) {
@@ -273,16 +273,18 @@ document.addEventListener('DOMContentLoaded', function() {
         };
 
         const LCD_NUDGE_LS = 'tstat10_lcd_bezel_nudge_px';
+        if (typeof window._tstatLcdOutlineLocked !== 'boolean') window._tstatLcdOutlineLocked = false;
         const persistLcdNudge = () => {
             try {
                 localStorage.setItem(
                     LCD_NUDGE_LS,
                     JSON.stringify({
                         x: Math.round(Number(window._tstatLcdNudgeX) || 0),
-                        y: Math.round(Number(window._tstatLcdNudgeY) || 0)
+                        y: Math.round(Number(window._tstatLcdNudgeY) || 0),
+                        locked: !!window._tstatLcdOutlineLocked
                     })
                 );
-            } catch (_) {}
+            } catch {}
         };
         const loadLcdNudge = () => {
             try {
@@ -291,9 +293,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 const o = JSON.parse(raw);
                 window._tstatLcdNudgeX = Number(o.x) || 0;
                 window._tstatLcdNudgeY = Number(o.y) || 0;
-            } catch (_) {
+                window._tstatLcdOutlineLocked = !!o.locked;
+            } catch {
                 window._tstatLcdNudgeX = 0;
                 window._tstatLcdNudgeY = 0;
+                window._tstatLcdOutlineLocked = false;
             }
         };
         window._applyTstatLcdNudgeTransform = () => {
@@ -342,6 +346,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 const k = e.key;
                 if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(k)) return;
+                if (window._tstatLcdOutlineLocked) return;
                 e.preventDefault();
                 e.stopPropagation();
                 const step = e.shiftKey ? 8 : 1;
@@ -452,7 +457,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (typeof e.pointerId === 'number') {
                     try {
                         tstatContainer.setPointerCapture(e.pointerId);
-                    } catch (_) {}
+                    } catch {}
                 }
                 return;
             }
@@ -468,7 +473,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (typeof e.pointerId === 'number') {
                 try {
                     tstatContainer.setPointerCapture(e.pointerId);
-                } catch (_) {}
+                } catch {}
             }
         });
 
@@ -486,7 +491,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (typeof e.pointerId === 'number') {
                 try {
                     tstatContainer.releasePointerCapture(e.pointerId);
-                } catch (_) {}
+                } catch {}
             }
         };
 
@@ -516,10 +521,19 @@ document.addEventListener('DOMContentLoaded', function() {
                     layer.appendChild(strip);
                 });
                 deviceBezel.insertBefore(layer, lcd.nextSibling);
+                layer.addEventListener('contextmenu', (e) => {
+                    if (!window._isVisualEditMode || !document.body.classList.contains('visual-edit-shell')) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (typeof window._openLcdOutlineTreeContextMenu === 'function') {
+                        window._openLcdOutlineTreeContextMenu(e);
+                    }
+                });
                 layer.addEventListener('pointerdown', (e) => {
                     const strip = e.target.closest?.('[data-lcd-edge]');
                     if (!strip || !layer.contains(strip)) return;
                     if (!window._isVisualEditMode || !document.body.classList.contains('visual-edit-shell')) return;
+                    if (window._tstatLcdOutlineLocked) return;
                     if (e.button !== 0) return;
                     e.preventDefault();
                     e.stopPropagation();
@@ -534,7 +548,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     };
                     try {
                         layer.setPointerCapture(e.pointerId);
-                    } catch (_) {}
+                    } catch {}
                 });
             }
             return layer;
@@ -552,6 +566,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
             layer.style.display = 'block';
+            layer.classList.toggle('tstat-lcd-edge-layer--locked', !!window._tstatLcdOutlineLocked);
             const z = Number(window._tstatZoom || 1) || 1;
             const br = deviceBezel.getBoundingClientRect();
             const lr = lcd.getBoundingClientRect();
@@ -576,7 +591,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!lcdOutlineDrag || e.pointerId !== lcdOutlineDrag.pointerId) return;
             try {
                 document.getElementById('tstat-lcd-edge-layer')?.releasePointerCapture(e.pointerId);
-            } catch (_) {}
+            } catch {}
             lcdOutlineDrag = null;
             persistLcdNudge();
         };

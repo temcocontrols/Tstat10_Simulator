@@ -1,4 +1,5 @@
 *.log
+logs/browser-console.jsonl
 node_modules/
 .DS_Store
 playwright-report/

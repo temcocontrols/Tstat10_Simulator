@@ -1,0 +1,13 @@
+{
+  "$comment": "Single source for allowed widget `type` in screen JSON; merged into JSON Schema at codegen.",
+  "types": [
+    "label",
+    "menu_row",
+    "blank",
+    "header",
+    "box",
+    "button",
+    "footer_hint",
+    "footer_nav"
+  ]
+}

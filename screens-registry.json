@@ -1,0 +1,53 @@
+{
+  "screens": [
+    {
+      "routeKey": "main",
+      "page": "MAIN_DISPLAY",
+      "displayName": "Home",
+      "jsonPath": "./main_display.json"
+    },
+    {
+      "routeKey": "setup",
+      "page": "SETUP_MENU",
+      "displayName": "Setup menu",
+      "jsonPath": "./setup_menu.json"
+    },
+    {
+      "routeKey": "ethernet",
+      "page": "WIFI_SETTINGS",
+      "displayName": "Wi-Fi setup",
+      "jsonPath": "./ethernet_setup.json"
+    },
+    {
+      "routeKey": "provisioning",
+      "page": "PROVISIONING_SETUP",
+      "displayName": "Provisioning",
+      "jsonPath": "./provisioning_setup.json"
+    },
+    {
+      "routeKey": "settings",
+      "page": "RS485_SETTINGS",
+      "displayName": "RS485 settings",
+      "jsonPath": "./network_settings.json"
+    },
+    {
+      "routeKey": "clock",
+      "page": "CLOCK_SETTINGS",
+      "displayName": "Clock setup",
+      "jsonPath": "./clock_setup.json"
+    },
+    {
+      "routeKey": "oat",
+      "page": "OAT_SETTINGS",
+      "displayName": "Outside air temp",
+      "jsonPath": "./oat_setup.json"
+    },
+    {
+      "routeKey": "tbd",
+      "page": "TBD_SETTINGS",
+      "displayName": "To be done",
+      "jsonPath": "./tbd_setup.json"
+    }
+  ],
+  "additionalPageIdsForSchema": ["NETWORK_SETTINGS"]
+}

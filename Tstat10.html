@@ -253,6 +253,42 @@
                     </div>
                 </div>
                 <div id="layout-props-content" class="layout-props-panel__content"></div>
+                <div id="layout-props-font-panel" class="layout-props-panel__content layout-props-font-panel" hidden>
+                    <p class="layout-props-font-panel__intro">
+                        Screen-wide defaults in <code>styles.fontFamily</code>, <code>fontSize</code>, and <code>fontWeight</code> (LCD container + rows). Per-widget <code>font</code> in the Inspector still overrides.
+                    </p>
+                    <div class="layout-props-font-panel__field">
+                        <label for="layout-font-family">Font family (CSS stack)</label>
+                        <textarea id="layout-font-family" rows="3" spellcheck="false" title="Comma-separated font list, e.g. Fira Mono, Consolas, monospace"></textarea>
+                    </div>
+                    <div class="layout-props-row">
+                        <label for="layout-font-size">Font size</label>
+                        <input id="layout-font-size" type="text" spellcheck="false" placeholder="18px" title="e.g. 18px or 1.125rem" />
+                    </div>
+                    <div class="layout-props-row">
+                        <label for="layout-font-weight">Font weight</label>
+                        <input id="layout-font-weight" type="text" spellcheck="false" placeholder="600" title="e.g. 600, bold, or 400" />
+                    </div>
+                    <div class="layout-props-font-panel__presets" role="group" aria-label="Font presets">
+                        <span class="layout-props-font-panel__presets-label">Presets</span>
+                        <div class="layout-props-font-panel__preset-btns">
+                            <button type="button" class="layout-props-font-panel__preset" data-font-preset="hardware" title="Heavy monospace stack (hardware-style LCD)">Hardware-style</button>
+                            <button type="button" class="layout-props-font-panel__preset" data-font-preset="stock" title="Sans stack similar to stock JSON">Stock sans</button>
+                            <button type="button" class="layout-props-font-panel__preset" data-font-preset="compact" title="Slightly smaller mono stack">Compact mono</button>
+                        </div>
+                    </div>
+                    <div class="layout-props-font-panel__preview-wrap">
+                        <span class="layout-props-font-panel__preview-label">Preview</span>
+                        <div id="layout-font-preview" class="layout-props-font-panel__preview" aria-live="polite">Aa 0123 MAIN · IP 192.168.1.1</div>
+                    </div>
+                    <div class="layout-props-font-panel__actions">
+                        <button type="button" id="layout-font-apply" class="layout-props-font-panel__apply">Apply to screen</button>
+                    </div>
+                    <p class="layout-props-font-panel__hint">Apply saves this screen draft to the browser cache (same as Inspector). Use <strong>Save</strong> / save-server to write JSON to disk.</p>
+                </div>
+                <div id="layout-props-tab-panel-other" class="layout-props-panel__content layout-props-tab-panel-other" hidden>
+                    <p class="layout-props-tab-panel-other__text">This tab is not available in the web simulator yet.</p>
+                </div>
             </div>
         </div>
             <script>
@@ -295,17 +331,18 @@
                 }
             })();
             </script>
-            <script type="module" src="network-settings-renderer.js?v=20260426d"></script>
+            <script type="module" src="network-settings-renderer.js?v=20260409f"></script>
             <script src="lcd-content.js"></script>
             <!-- Logic moved to ui-bridge.js for CSP compliance -->
         </div>
         <div class="sls-assets-strip" aria-label="Screen resources (SquareLine-style strip)">
             <span class="sls-assets-strip__title">Resources</span>
-            <span class="sls-asset-chip">main_display.json</span>
+            <span id="sls-screen-registry-assets" class="sls-assets-strip__registry-chips"></span>
             <span class="sls-asset-chip">Icons/*.svg</span>
             <span class="sls-asset-chip">tstat10_parameters.json</span>
             <span class="sls-asset-chip">mock_bridge.js</span>
         </div>
+        <script type="module" src="assets-strip-screen-registry.mjs"></script>
         </div>
     </div>
     <!-- Base64 image logic moved to ui-bridge.js for CSP compliance -->

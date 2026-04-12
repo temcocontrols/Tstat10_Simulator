@@ -1,5 +1,6 @@
 {
   "name": "tstat10-simulator",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "postinstall": "node tools/postinstall.mjs",
@@ -7,9 +8,13 @@
     "dev": "node tools/dev-server.mjs",
     "setup": "node tools/setup.mjs",
     "lint": "eslint .",
+    "lint:ci": "eslint . --max-warnings=0",
     "lint:fix": "eslint . --fix",
     "prepare": "husky",
     "doctor": "node tools/doctor.mjs",
+    "build:schema-validator": "node tools/embed-screens-registry.mjs && node tools/generate-screen-json-validator.mjs",
+    "validate:screens": "node tools/validate-screen-json.mjs",
+    "validate:screens:ci": "npm run build:schema-validator && git diff --exit-code screen-json-validate-generated.mjs screens-registry.embedded.mjs && npm run validate:screens",
     "test:e2e": "playwright test",
     "test:e2e:install": "playwright install chromium",
     "save-server": "node save-server.mjs"
@@ -20,12 +25,13 @@
   "devDependencies": {
     "@eslint/js": "^9.17.0",
     "@playwright/test": "^1.49.1",
+    "ajv": "^8.18.0",
     "eslint": "^9.17.0",
     "globals": "^15.14.0",
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0"
   },
   "lint-staged": {
-    "*.{js,cjs,mjs}": "eslint --fix"
+     "*.{js,ts,mjs}": "eslint --fix --max-warnings=0 --no-warn-ignored"
   }
 }

@@ -102,7 +102,7 @@ Initial development and "mimicking" of the application occur in a standard web b
 
 The UI architecture relies on a data-driven, multi-screen model to facilitate rapid prototyping without firmware updates:
 \* \*\*State Management:\*\* `window._currentScreenData` maintains the active screen's configuration, parsed from discrete `.json` payloads.
-\* \*\*Dynamic Navigation:\*\* A central `window.navigateTo(screenName)` router transitions between screens (e.g., `main_display.json`, `network_settings.json`).
+\* \*\*Dynamic Navigation:\*\* A central `window.navigateTo(routeKey)` router uses paths from [`screens-registry.json`](screens-registry.json) (see [`screen-paths.js`](screen-paths.js): `ROUTE_TO_JSON_PATH`, `ROUTE_KEY`, `PAGE`).
 \* \*\*LVGL-Style Widgets:\*\* Abstract JSON objects (`type: "header"`, `type: "menu_row"`, `type: "button"`) are mapped dynamically to absolute-positioned DOM elements at runtime.
 
 \---
@@ -114,3 +114,11 @@ The simulator includes a comprehensive runtime visual editor, allowing users to 
 \* \*\*Drag-and-Drop Elements:\*\* Easily reorder `menu_row` items vertically via a drag-and-drop interface.
 \* \*\*Inline Modifications:\*\* Modify text labels inline and adjust alignments/widths via context menus and scroll-wheel shortcuts.
 \* \*\*Persistence:\*\* Changes lock and save directly back to the source `.json` files via a local Node.js endpoint (`http://localhost:5001/save_settings`) or over the JS Bridge via the `save_settings` action.
+
+## 7. Architectural decision records (ADRs)
+
+Short, durable decisions live under [`docs/adr/`](docs/adr/).
+
+- [ADR 0001 — Defer front-end bundler](docs/adr/0001-defer-frontend-bundler.md) — stay on native ESM + dev server; no `npm run build` for the UI until requirements change.
+- [ADR 0002 — Mobile phone client (draft)](docs/adr/0002-mobile-phone-client.md) — PWA vs wrapper vs native; provisioning / Wi‑Fi handoff; see **[`Todo.md`](Todo.md)** for phased tasks.
+- [T3000 / HVC + LCD merge (plan)](docs/plan-t3000-hvc-lcd-merge.md) — embed vs shared package vs monorepo; phased roadmap; **[`Todo.md`](Todo.md)** § *T3000 / HVC + LCD simulator merge*.

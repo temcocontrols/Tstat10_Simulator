@@ -45,175 +45,59 @@ import {
     applyFirmwareColorThemeToScreenData
 } from './lcd-firmware-color-themes.js';
 import {
-    PROJECT_SCREEN_JSON_PATHS,
     ROUTE_TO_JSON_PATH,
-    DEFAULT_STARTUP_JSON_PATH
+    DEFAULT_STARTUP_JSON_PATH,
+    SCREENS_BY_PAGE,
+    SCREENS_REGISTRY,
+    PAGE,
+    ROUTE_KEY,
+    SETUP_MENU_ROW_TO_ROUTE,
+    jsonPathMatchesRoute
 } from './screen-paths.js';
+import { getScreenJsonSchemaErrorSummary } from './screen-json-schema-validate.js';
 import { getLcdLibDiskSync, ensureLcdLibDiskCache } from './lcd-lib-client.js';
-
-function resolvedScreenBackgroundCss(data) {
-    const raw = (data?.styles?.bg || TSTAT10_FW_BG_CSS).trim() || TSTAT10_FW_BG_CSS;
-    const mode = data?.colorProfile?.mode || 'indexed';
-    return clampBackgroundToColorMode(raw, mode);
-}
+import {
+    LCD_GRID_COLS_MIN,
+    LCD_GRID_COLS_MAX,
+    LCD_GRID_ROWS_MIN,
+    LCD_GRID_ROWS_MAX,
+    clampGridDimensionInput,
+    resolvedScreenBackgroundCss,
+    canvasLogicalWidthPx,
+    canvasLogicalHeightPx,
+    nearIntPx,
+    injectLcdSnapGridOverlay
+} from './layout-editor-canvas-grid.js';
+import {
+    getScreenStateMap,
+    saveScreenToCache,
+    loadScreenFromCache,
+    syncWorkbenchNudgeIntoScreenDataForCache,
+    mergeProjectBackgroundIntoScreenData,
+    propagateProjectWideFirmwareTheme,
+    propagateProjectWideBackground,
+    loadCustomPaletteSvgs,
+    saveCustomPaletteSvgs,
+    loadCustomBgSwatches,
+    addCustomBgSwatchEntry,
+    removeCustomBgSwatchEntry
+} from './visual-edit-local-storage.js';
+import {
+    resolveMenuRowLabel,
+    getWidgetTreeName,
+    isRowSlotWidget,
+    getLayoutTreeNodeLayoutClasses,
+    layoutDropTargetsSameHierarchy,
+    normalizeLcdRowSlot,
+    layoutTreeSelectionMatchesNode,
+    parseWidgetIndexFromLayoutTreeNodeId,
+    buildTstatShellTreeNodes,
+    buildPageNodes,
+    findLayoutTreeNodeById
+} from './layout-tree-model.js';
 
 const DEFAULT_LCD_W = TSTAT10_LCD_WIDTH;
 const DEFAULT_LCD_H = TSTAT10_LCD_HEIGHT;
-
-/** Inspector → Screen: `layout.lcdTextColumns` / `lcdTextRows` bounds (overlay + horizontal snap). */
-const LCD_GRID_COLS_MIN = 4;
-const LCD_GRID_COLS_MAX = 48;
-const LCD_GRID_ROWS_MIN = 4;
-const LCD_GRID_ROWS_MAX = 48;
-
-function clampGridDimensionInput(value, min, max, fallback) {
-    const n = Math.round(Number(value));
-    if (!Number.isFinite(n)) return fallback;
-    return Math.max(min, Math.min(max, n));
-}
-
-/** Logical canvas width from screen JSON (fallback: `TSTAT10_LCD_WIDTH`). */
-function canvasLogicalWidthPx(data) {
-    return (
-        Number(
-            data?.layout?.lcdCanvas?.width ||
-                data?.layout?.canvas?.width ||
-                data?.canvasProfile?.width ||
-                DEFAULT_LCD_W
-        ) || DEFAULT_LCD_W
-    );
-}
-
-/** Logical canvas height from screen JSON (fallback: `TSTAT10_LCD_HEIGHT`). */
-function canvasLogicalHeightPx(data) {
-    return (
-        Number(
-            data?.layout?.lcdCanvas?.height ||
-                data?.layout?.canvas?.height ||
-                data?.canvasProfile?.height ||
-                DEFAULT_LCD_H
-        ) || DEFAULT_LCD_H
-    );
-}
-
-/** True when a stored pixel dimension is within `tol` of a legacy template value. */
-function nearIntPx(a, b, tol = 2) {
-    return Math.abs(Number(a) - Number(b)) < tol;
-}
-
-/** Parse #rrggbb for grid tinting; returns null if not a 6-digit hex. */
-function parseHexColorRgb(hex) {
-    const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(String(hex || '').trim());
-    if (!m) return null;
-    return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
-}
-
-/** `#rrggbb` for `<input type="color">`, or null if the string is not a usable CSS color. */
-function cssColorToHex6ForPicker(css) {
-    const raw = String(css || '').trim();
-    if (!raw) return null;
-    const rgb = parseHexColorRgb(raw);
-    if (rgb) {
-        const h = (n) => ('0' + n.toString(16)).slice(-2);
-        return `#${h(rgb.r)}${h(rgb.g)}${h(rgb.b)}`;
-    }
-    const m3 = /^#([a-f\d])([a-f\d])([a-f\d])$/i.exec(raw);
-    if (m3) {
-        const e = (c) => ('0' + parseInt(c + c, 16).toString(16)).slice(-2);
-        return `#${e(m3[1])}${e(m3[2])}${e(m3[3])}`;
-    }
-    try {
-        const el = document.createElement('span');
-        el.style.color = '';
-        el.style.color = raw;
-        if (!el.style.color) return null;
-        document.documentElement.appendChild(el);
-        const computed = getComputedStyle(el).color;
-        el.remove();
-        const m = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/.exec(computed);
-        if (!m) return null;
-        const toH = (n) =>
-            ('0' + Math.max(0, Math.min(255, parseInt(n, 10))).toString(16)).slice(-2);
-        return `#${toH(m[1])}${toH(m[2])}${toH(m[3])}`;
-    } catch {
-        return null;
-    }
-}
-
-/** Grid overlay: lighter wash from `styles.bg`, slightly brighter lines. */
-function lcdGridOverlayColorsFromBg(bgCss) {
-    const rgb = parseHexColorRgb(bgCss);
-    if (!rgb) {
-        return {
-            wash: 'rgba(255,255,255,0.12)',
-            line: 'rgba(255,255,255,0.35)'
-        };
-    }
-    const mix = (t) => ({
-        r: Math.round(rgb.r + (255 - rgb.r) * t),
-        g: Math.round(rgb.g + (255 - rgb.g) * t),
-        b: Math.round(rgb.b + (255 - rgb.b) * t)
-    });
-    const w = mix(0.12);
-    const ln = mix(0.38);
-    return {
-        wash: `rgba(${w.r},${w.g},${w.b},0.35)`,
-        line: `rgba(${ln.r},${ln.g},${ln.b},0.65)`
-    };
-}
-
-function injectLcdSnapGridOverlay(lcdEl, screenData, widthPx, heightPx) {
-    if (!lcdEl) return;
-    const prev = lcdEl.querySelector('.debug-grid');
-    if (prev) prev.remove();
-    if (!window._tstatShowGridLayer) return;
-    const data = screenData || window._currentScreenData;
-    if (!data) return;
-    const rows = data.layout?.lcdTextRows || 10;
-    const cols = data.layout?.lcdTextColumns || 16;
-    const w = Math.max(1, Number(widthPx) || DEFAULT_LCD_W);
-    const h = Math.max(1, Number(heightPx) || DEFAULT_LCD_H);
-    const cellW = w / cols;
-    const cellH = h / rows;
-    const bg = resolvedScreenBackgroundCss(data);
-    const { wash, line } = lcdGridOverlayColorsFromBg(bg);
-
-    const grid = document.createElement('div');
-    grid.className = 'debug-grid';
-    grid.style.zIndex = '0';
-    grid.style.pointerEvents = 'none';
-    grid.style.position = 'absolute';
-    grid.style.left = '0';
-    grid.style.top = '0';
-    grid.style.width = `${w}px`;
-    grid.style.height = `${h}px`;
-    grid.style.background = wash;
-    grid.style.boxSizing = 'border-box';
-
-    for (let c = 1; c < cols; c++) {
-        const vline = document.createElement('div');
-        vline.style.position = 'absolute';
-        vline.style.left = `${c * cellW}px`;
-        vline.style.top = '0';
-        vline.style.width = '1px';
-        vline.style.height = `${h}px`;
-        vline.style.background = line;
-        vline.style.zIndex = '1';
-        grid.appendChild(vline);
-    }
-    for (let r = 1; r <= rows; r++) {
-        const hline = document.createElement('div');
-        hline.style.position = 'absolute';
-        hline.style.left = '0';
-        hline.style.top = `${(r - 1) * cellH}px`;
-        hline.style.width = `${w}px`;
-        hline.style.height = '1px';
-        hline.style.background = line;
-        hline.style.zIndex = '1';
-        grid.appendChild(hline);
-    }
-    lcdEl.insertBefore(grid, lcdEl.firstChild);
-}
 
 const SIMULATED_LR_LONG_PRESS_MS = 3000;
 let _leftRightLongPressTimer = null;
@@ -229,10 +113,10 @@ function clearLeftRightLongPressTimer() {
 
 function performMainDisplayEnterSetupMenu() {
     const page = window._currentScreenData?.page;
-    if (page !== 'MAIN_DISPLAY') return;
+    if (page !== PAGE.MAIN) return;
     window._ipEditMode = false;
     window._valueEditMode = false;
-    window.navigateTo('setup');
+    window.navigateTo(ROUTE_KEY.SETUP);
 }
 
 function tryStartLeftRightLongPressTimer() {
@@ -300,181 +184,6 @@ function ensureIpv4AlignedStyles() {
     document.head.appendChild(st);
 }
 
-function getScreenStateMap() {
-    if (!window._screenStateByJsonPath) window._screenStateByJsonPath = {};
-    return window._screenStateByJsonPath;
-}
-
-function cacheKeyForJsonPath(jsonPath) {
-    return `tstat_cache_${jsonPath}`;
-}
-
-function saveScreenToCache(jsonPath, data) {
-    if (!jsonPath || !data) return;
-    try {
-        localStorage.setItem(cacheKeyForJsonPath(jsonPath), JSON.stringify(data, null, 2));
-    } catch (err) {
-        console.warn('[Visual Edit] Failed to persist cache:', err);
-    }
-}
-
-function loadScreenFromCache(jsonPath) {
-    try {
-        const raw = localStorage.getItem(cacheKeyForJsonPath(jsonPath));
-        return raw ? JSON.parse(raw) : null;
-    } catch (err) {
-        console.warn('[Visual Edit] Failed to read cache:', err);
-        return null;
-    }
-}
-
-/** Workbench LCD translate (Alt+arrows / edge drag) — mirror globals ↔ `canvasProfile` so cache + JSON drafts stay aligned. */
-function syncWorkbenchNudgeIntoScreenDataForCache(data) {
-    if (!data || typeof data !== 'object') return;
-    if (!data.canvasProfile) data.canvasProfile = {};
-    data.canvasProfile.previewOffsetX = Math.round(Number(window._tstatLcdNudgeX) || 0);
-    data.canvasProfile.previewOffsetY = Math.round(Number(window._tstatLcdNudgeY) || 0);
-}
-
-function mergeProjectBackgroundIntoScreenData(screenData, bgCss) {
-    if (!screenData || typeof screenData !== 'object' || typeof bgCss !== 'string' || !bgCss.trim()) return;
-    const v = bgCss.trim();
-    if (!screenData.styles) screenData.styles = {};
-    screenData.styles.bg = v;
-    if (screenData.colorProfile && typeof screenData.colorProfile === 'object') {
-        if (!screenData.colorProfile.themeTokens) screenData.colorProfile.themeTokens = {};
-        screenData.colorProfile.themeTokens.bg = v;
-    }
-}
-
-/** Project-wide: LCD background + row highlight (`lcdTheme.c` backgroundColor / backgroundColor1). */
-function mergeProjectFirmwareThemeIntoScreenData(screenData, bgCss, highlightCss, colorMode) {
-    if (!screenData || typeof screenData !== 'object') return;
-    const bg = String(bgCss || '').trim();
-    const hl = String(highlightCss || '').trim();
-    if (!bg || !hl) return;
-    mergeProjectBackgroundIntoScreenData(screenData, bg);
-    if (!screenData.styles) screenData.styles = {};
-    screenData.styles.highlight = hl;
-    if (screenData.colorProfile && typeof screenData.colorProfile === 'object') {
-        if (!screenData.colorProfile.themeTokens) screenData.colorProfile.themeTokens = {};
-        screenData.colorProfile.themeTokens.accent = hl;
-        if (typeof colorMode === 'string' && (colorMode === 'indexed' || colorMode === 'reduced_rgb')) {
-            screenData.colorProfile.mode = colorMode;
-        }
-    }
-}
-
-function propagateProjectWideFirmwareTheme(bgCss, highlightCss, currentJsonPath, colorMode) {
-    const cur = String(currentJsonPath || window._currentJsonPath || '');
-    const bg = String(bgCss || '').trim();
-    const hl = String(highlightCss || '').trim();
-    if (!bg || !hl) return;
-    for (const rel of PROJECT_SCREEN_JSON_PATHS) {
-        if (rel === cur) continue;
-        const cached = loadScreenFromCache(rel);
-        if (cached) {
-            mergeProjectFirmwareThemeIntoScreenData(cached, bg, hl, colorMode);
-            saveScreenToCache(rel, cached);
-        }
-    }
-    const missing = PROJECT_SCREEN_JSON_PATHS.filter((rel) => rel !== cur && !loadScreenFromCache(rel));
-    if (missing.length === 0) return;
-    Promise.all(
-        missing.map((rel) =>
-            fetch(`${rel}?_=${Date.now()}`)
-                .then((r) => {
-                    if (!r.ok) throw new Error(String(r.status));
-                    return r.json();
-                })
-                .then((j) => {
-                    mergeProjectFirmwareThemeIntoScreenData(j, bg, hl, colorMode);
-                    saveScreenToCache(rel, j);
-                })
-                .catch(() => {})
-        )
-    ).then(() => {
-        /* no-op */
-    });
-}
-
-/**
- * SquareLine-style project theme (phase 1): one shared LCD background for every screen JSON.
- * Updates localStorage cache for each path; fetches uncached files from disk and caches them.
- * Exception pages can be added later (e.g. skip list or per-page overrides).
- */
-function propagateProjectWideBackground(bgCss, currentJsonPath) {
-    const cur = String(currentJsonPath || window._currentJsonPath || '');
-    const bg = String(bgCss || '').trim();
-    if (!bg) return;
-    for (const rel of PROJECT_SCREEN_JSON_PATHS) {
-        if (rel === cur) continue;
-        const cached = loadScreenFromCache(rel);
-        if (cached) {
-            mergeProjectBackgroundIntoScreenData(cached, bg);
-            saveScreenToCache(rel, cached);
-        }
-    }
-    const missing = PROJECT_SCREEN_JSON_PATHS.filter((rel) => rel !== cur && !loadScreenFromCache(rel));
-    if (missing.length === 0) return;
-    Promise.all(
-        missing.map((rel) =>
-            fetch(`${rel}?_=${Date.now()}`)
-                .then((r) => {
-                    if (!r.ok) throw new Error(String(r.status));
-                    return r.json();
-                })
-                .then((j) => {
-                    mergeProjectBackgroundIntoScreenData(j, bg);
-                    saveScreenToCache(rel, j);
-                })
-                .catch(() => {})
-        )
-    ).then(() => {
-        /* no-op: status already written from apply path */
-    });
-}
-
-function getIconPaletteStorageKey() {
-    return 'tstat_icon_palette_custom_svgs_v2';
-}
-
-function loadCustomPaletteSvgs() {
-    try {
-        const raw = localStorage.getItem(getIconPaletteStorageKey());
-        const arr = raw ? JSON.parse(raw) : [];
-        if (!Array.isArray(arr)) return [];
-        return arr
-            .map((item, idx) => {
-                if (typeof item === 'string' && item.includes('<svg')) {
-                    return { name: `Custom ${idx + 1}`, svg: item };
-                }
-                if (item && typeof item === 'object' && typeof item.svg === 'string' && item.svg.includes('<svg')) {
-                    return { name: String(item.name || `Custom ${idx + 1}`), svg: item.svg };
-                }
-                return null;
-            })
-            .filter(Boolean);
-    } catch {
-        return [];
-    }
-}
-
-function saveCustomPaletteSvgs(list) {
-    try {
-        const normalized = list
-            .slice(0, 32)
-            .map((item, idx) => ({
-                name: String(item?.name || `Custom ${idx + 1}`),
-                svg: String(item?.svg || '')
-            }))
-            .filter((item) => item.svg.includes('<svg'));
-        localStorage.setItem(getIconPaletteStorageKey(), JSON.stringify(normalized));
-    } catch (err) {
-        console.warn('[IconPalette] Failed to persist custom SVGs:', err);
-    }
-}
-
 /**
  * Simulator uses one logical framebuffer for every route (same as production Tstat10).
  * Normalizes JSON/cache so navigation never resizes the LCD or flips orientation.
@@ -495,7 +204,7 @@ function enforceSimulatorFixedLcdCanvas(data) {
 }
 
 function ensureMainDisplayIconLayout(data) {
-    if (!data || data.page !== 'MAIN_DISPLAY') return;
+    if (!data || data.page !== PAGE.MAIN) return;
     if (!Array.isArray(data.widgets)) data.widgets = [];
     const ch = Number(data.layout?.lcdCanvas?.height || data.canvasProfile?.height || DEFAULT_LCD_H);
     const cw = Number(data.layout?.lcdCanvas?.width || data.canvasProfile?.width || DEFAULT_LCD_W);
@@ -534,61 +243,6 @@ function ensureMainDisplayIconLayout(data) {
             w.y = clampY(w.y);
         }
     });
-}
-
-function resolveMenuRowLabel(widget) {
-    const base = String(widget?.label || '');
-    const custom = String(widget?.labelCustom ?? base);
-    const mode = String(widget?.labelDisplayMode || '').toLowerCase();
-    if (mode === 'none') return '';
-    if (mode === '8char') return custom.slice(0, 8);
-    if (mode === '20char') return custom.slice(0, 20);
-    if (mode === 'custom') return custom;
-    // Backward-compatible default behavior.
-    return base;
-}
-
-function inferMenuRowTreeName(widget) {
-    const id = String(widget?.id || '').toLowerCase();
-    const label = String(widget?.label || '').trim();
-    const value = String(widget?.value ?? '').trim();
-    const known = {
-        ui_item_ip: 'IP Address',
-        ui_item_mask: 'Subnet Mask',
-        ui_item_gw: 'Gateway',
-        ui_item_dhcp: 'DHCP',
-        ui_item_prov_ap: 'AP',
-        ui_item_prov_pwd: 'Provisioning Password',
-        ui_item_prov_ssid: 'Network (from phone)',
-        ui_item_prov_pass: 'Pass',
-        ui_item_prov_status: 'Status',
-        ui_item_prov_rssi: 'RSSI',
-        ui_item_prov_rssi_quality: 'Signal strength',
-        ui_item_addr: 'Device Address',
-        ui_item_baud: 'Baud Rate'
-    };
-    if (known[id]) return known[id];
-    if (label.toUpperCase() === 'IP') return 'IP Address';
-    if (label.toUpperCase() === 'MASK') return 'Subnet Mask';
-    if (label.toUpperCase() === 'GATE') return 'Gateway';
-    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(value)) return `${label || 'IPv4'} Address`;
-    return label || widget?.id || 'Row';
-}
-
-function getWidgetTreeName(widget) {
-    if (!widget || typeof widget !== 'object') return '(unnamed)';
-    if (typeof widget.treeName === 'string' && widget.treeName.trim()) return widget.treeName.trim();
-    if (widget.type === 'menu_row') return inferMenuRowTreeName(widget);
-    if (widget.type === 'label' && (widget.libraryIconName || widget.libraryIconId)) {
-        return `Icon ${widget.libraryIconName || widget.libraryIconId}`;
-    }
-    if (widget.id) return widget.id;
-    if (widget.label) return widget.label;
-    if (typeof widget.text === 'string' && widget.text.trim()) {
-        const raw = widget.text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-        return raw || '(unnamed)';
-    }
-    return '(unnamed)';
 }
 
 function getLastScreenStorageKey() {
@@ -699,7 +353,7 @@ function triggerEndpointFlash(rowId) {
 
 function ungroupMainIcons() {
     const data = window._currentScreenData;
-    if (!data || data.page !== 'MAIN_DISPLAY') return false;
+    if (!data || data.page !== PAGE.MAIN) return false;
     const widgets = data.widgets || [];
     const groupIdx = widgets.findIndex((w) => w.type === 'label' && (w.id === 'main_icons_group' || String(w.text || '').includes('title="Day / night"')));
     if (groupIdx === -1) return false;
@@ -731,7 +385,7 @@ function ungroupMainIcons() {
 
 function regroupMainIcons() {
     const data = window._currentScreenData;
-    if (!data || data.page !== 'MAIN_DISPLAY') return false;
+    if (!data || data.page !== PAGE.MAIN) return false;
     const widgets = data.widgets || [];
     const cw = canvasLogicalWidthPx(data);
     const ch = canvasLogicalHeightPx(data);
@@ -778,6 +432,64 @@ function removeExistingTreeContextMenu() {
 function removeExistingCanvasPickMenu() {
     const existing = document.getElementById('layout-canvas-pick-menu');
     if (existing) existing.remove();
+}
+
+function layoutTreeNodeIdCssEscape(id) {
+    const s = String(id || '');
+    if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') return CSS.escape(s);
+    return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+/** Find an element under `data-tree-node-id` that has `enableInlineTextEdit`’s `_startInlineEdit` (self, ancestors, or descendants — e.g. button label span). */
+function findLcdInlineEditHostForTreeNode(treeNodeId) {
+    const lcd = document.getElementById('tstat-lcd-container');
+    if (!lcd || !treeNodeId) return null;
+    const safe = layoutTreeNodeIdCssEscape(treeNodeId);
+    const root = lcd.querySelector(`[data-tree-node-id="${safe}"]`);
+    if (!root) return null;
+    const idStr = String(treeNodeId);
+    const rowOnly = /^w-\d+$/.test(idStr);
+    const idx = parseWidgetIndexFromLayoutTreeNodeId(idStr);
+    const widgets = window._currentScreenData?.widgets;
+    const isMenuRowContainer =
+        rowOnly && idx >= 0 && Array.isArray(widgets) && widgets[idx] && widgets[idx].type === 'menu_row';
+    let w = root;
+    while (w && w !== lcd) {
+        if (typeof w._startInlineEdit === 'function') return w;
+        w = w.parentElement;
+    }
+    if (isMenuRowContainer) return null;
+    const all = root.getElementsByTagName('*');
+    for (let i = 0; i < all.length; i++) {
+        const n = all[i];
+        if (typeof n._startInlineEdit === 'function') return n;
+    }
+    return null;
+}
+
+function lcdElementHasInlineEditHost(treeNodeId) {
+    return !!findLcdInlineEditHostForTreeNode(treeNodeId);
+}
+
+function tryInvokeInlineEditForTreeNodeId(treeNodeId) {
+    const t = findLcdInlineEditHostForTreeNode(treeNodeId);
+    if (!t) return false;
+    t._startInlineEdit();
+    return true;
+}
+
+/** When a widget has `parentId`, hierarchy id of the parent row to select for dragging the whole group. */
+function resolveParentGroupSelectionTreeNodeId(data, treeNodeId) {
+    const widgets = data?.widgets;
+    if (!Array.isArray(widgets) || !treeNodeId) return null;
+    const idx = parseWidgetIndexFromLayoutTreeNodeId(treeNodeId);
+    if (idx < 0 || idx >= widgets.length || !widgets[idx]) return null;
+    const w = widgets[idx];
+    const pid = w.parentId;
+    if (!pid || typeof pid !== 'string') return null;
+    const pIdx = widgets.findIndex((x) => x && x.id === pid);
+    if (pIdx < 0) return null;
+    return `w-${pIdx}`;
 }
 
 /** SquareLine-style: right-click on LCD shows widgets under the cursor (overlapping pick). */
@@ -845,6 +557,104 @@ function openCanvasWidgetPickMenu(e) {
         });
         menu.appendChild(btn);
     });
+    const topPickId = picks[0]?.id;
+    const pdata = window._currentScreenData;
+    const addQuickSep = () => {
+        const sep = document.createElement('div');
+        sep.style.height = '1px';
+        sep.style.background = '#374151';
+        sep.style.margin = '6px 0';
+        menu.appendChild(sep);
+    };
+    const styleQuickBtn = (b) => {
+        b.type = 'button';
+        b.style.display = 'block';
+        b.style.width = '100%';
+        b.style.textAlign = 'left';
+        b.style.padding = '6px 8px';
+        b.style.border = 'none';
+        b.style.borderRadius = '6px';
+        b.style.background = 'transparent';
+        b.style.color = '#e5e7eb';
+        b.style.cursor = 'pointer';
+        b.style.fontSize = '12px';
+        b.addEventListener('mouseenter', () => {
+            b.style.background = '#1f2937';
+        });
+        b.addEventListener('mouseleave', () => {
+            b.style.background = 'transparent';
+        });
+    };
+    if (topPickId && lcdElementHasInlineEditHost(topPickId)) {
+        addQuickSep();
+        const editHere = document.createElement('button');
+        editHere.textContent = 'Edit text here';
+        styleQuickBtn(editHere);
+        editHere.style.color = '#93c5fd';
+        editHere.addEventListener('click', () => {
+            removeExistingCanvasPickMenu();
+            if (typeof window._selectLayoutNode === 'function') window._selectLayoutNode(topPickId);
+            tryInvokeInlineEditForTreeNodeId(topPickId);
+        });
+        menu.appendChild(editHere);
+    }
+    const groupSel = topPickId && pdata ? resolveParentGroupSelectionTreeNodeId(pdata, topPickId) : null;
+    if (groupSel) {
+        if (!topPickId || !lcdElementHasInlineEditHost(topPickId)) addQuickSep();
+        const moveGrp = document.createElement('button');
+        moveGrp.textContent = 'Select parent group to move';
+        styleQuickBtn(moveGrp);
+        moveGrp.style.color = '#c4b5fd';
+        moveGrp.addEventListener('click', () => {
+            removeExistingCanvasPickMenu();
+            if (typeof window._selectLayoutNode === 'function') window._selectLayoutNode(groupSel);
+            const jp = window._currentJsonPath;
+            if (jp) renderScreen(jp);
+        });
+        menu.appendChild(moveGrp);
+    }
+    const addLockOutlineRow = () => {
+        const sep = document.createElement('div');
+        sep.style.height = '1px';
+        sep.style.background = '#374151';
+        sep.style.margin = '6px 0';
+        menu.appendChild(sep);
+        const lockBtn = document.createElement('button');
+        lockBtn.type = 'button';
+        const locked = !!window._tstatLcdOutlineLocked;
+        lockBtn.textContent = locked ? 'Unlock LCD outline (viewport)' : 'Lock LCD outline (viewport)';
+        lockBtn.style.display = 'block';
+        lockBtn.style.width = '100%';
+        lockBtn.style.textAlign = 'left';
+        lockBtn.style.padding = '6px 8px';
+        lockBtn.style.border = 'none';
+        lockBtn.style.borderRadius = '6px';
+        lockBtn.style.background = 'transparent';
+        lockBtn.style.color = '#fde68a';
+        lockBtn.style.cursor = 'pointer';
+        lockBtn.style.fontSize = '11px';
+        lockBtn.addEventListener('mouseenter', () => {
+            lockBtn.style.background = '#1f2937';
+        });
+        lockBtn.addEventListener('mouseleave', () => {
+            lockBtn.style.background = 'transparent';
+        });
+        lockBtn.addEventListener('click', () => {
+            removeExistingCanvasPickMenu();
+            window._tstatLcdOutlineLocked = !locked;
+            window._persistTstatLcdNudge?.();
+            window._syncTstatLcdEdgeDragLayer?.();
+            const d = window._currentScreenData;
+            const jp = window._currentJsonPath;
+            if (d && jp) {
+                renderLayoutTreePanel(d, jp, renderScreen);
+                renderLayoutPropertiesPanel(d, jp, renderScreen);
+            }
+            if (jp) renderScreen(jp);
+        });
+        menu.appendChild(lockBtn);
+    };
+    addLockOutlineRow();
     document.body.appendChild(menu);
     const close = (evt) => {
         if (!menu.contains(evt.target)) {
@@ -913,6 +723,18 @@ function openTreeContextMenu(e, node, jsonPath, rerender) {
             };
             menu.appendChild(btn);
         };
+        const lockedNow = !!window._tstatLcdOutlineLocked;
+        addItem(lockedNow ? 'Unlock LCD outline (allow drag)' : 'Lock LCD outline (viewport)', () => {
+            window._tstatLcdOutlineLocked = !lockedNow;
+            window._persistTstatLcdNudge?.();
+            window._syncTstatLcdEdgeDragLayer?.();
+            const d = window._currentScreenData;
+            if (d && jsonPath) {
+                renderLayoutTreePanel(d, jsonPath, rerender);
+                renderLayoutPropertiesPanel(d, jsonPath, rerender);
+            }
+            rerender(jsonPath);
+        });
         addItem('Reset LCD position (workbench)', () => {
             window._tstatLcdNudgeX = 0;
             window._tstatLcdNudgeY = 0;
@@ -1136,85 +958,6 @@ function openTreeContextMenu(e, node, jsonPath, rerender) {
     }, 0);
 }
 
-/** Menu/blank rows share lcdRow vertical slots; label/header use canvas x/y (not row slots). */
-function isRowSlotWidget(w) {
-    return !!w && (w.type === 'menu_row' || w.type === 'blank');
-}
-function isLabelLikeLayoutWidget(w) {
-    return !!w && (w.type === 'label' || w.type === 'header');
-}
-
-/** CSS modifier classes for SquareLine-style hierarchy row / icon chip appearance. */
-function getLayoutTreeNodeLayoutClasses(n) {
-    const parts = [];
-    const w = n.widget;
-    if (n.childKind === 'widget' && w && typeof w.type === 'string') {
-        const t = w.type.replace(/[^a-z0-9_-]/gi, '');
-        if (t) parts.push(`layout-tree-node--wtype-${t}`);
-    }
-    if (n.childKind === 'label') parts.push('layout-tree-node--part-label');
-    else if (n.childKind === 'value') parts.push('layout-tree-node--part-value');
-    else if (n.childKind === 'group_icon') parts.push('layout-tree-node--part-icon');
-    else if (n.childKind === 'lcd_outline') parts.push('layout-tree-node--lcd-outline');
-    else if (n.childKind === 'shell_hw_group') parts.push('layout-tree-node--shell-hw-group');
-    else if (n.childKind === 'shell_hw_button') parts.push('layout-tree-node--shell-hw-btn');
-    else if (n.childKind === 'shell_ref_photo') parts.push('layout-tree-node--shell-ref-photo');
-    else if (n.childKind === 'tstat_body_folder') parts.push('layout-tree-node--tstat-body-folder');
-    else if (n.childKind === 'shell_bezel') parts.push('layout-tree-node--shell-bezel');
-    else if (n.childKind === 'shell_compass_logo') parts.push('layout-tree-node--shell-compass');
-    else if (n.childKind === 'shell_lock_control') parts.push('layout-tree-node--shell-lock');
-    return parts.join(' ');
-}
-
-/**
- * Reorder drops (tree or LCD): only swap/move among peers — rows↔rows, labels/headers↔labels/headers,
- * otherwise same widget type only (no dropping a row onto a label or mixing unrelated types).
- */
-function layoutDropTargetsSameHierarchy(fromW, toW) {
-    if (!fromW || !toW || fromW === toW) return false;
-    if (isRowSlotWidget(fromW) && isRowSlotWidget(toW)) return true;
-    if (isLabelLikeLayoutWidget(fromW) && isLabelLikeLayoutWidget(toW)) return true;
-    if (isRowSlotWidget(fromW) || isLabelLikeLayoutWidget(fromW)) return false;
-    if (isRowSlotWidget(toW) || isLabelLikeLayoutWidget(toW)) return false;
-    return fromW.type === toW.type;
-}
-
-function normalizeLcdRowSlot(n) {
-    const r = Math.round(Number(n));
-    return Number.isFinite(r) && r > 0 ? r : 1;
-}
-
-/**
- * True when the LCD/hierarchy selection refers to the same widget index as `nodeId`.
- * Lets row `w-3`, `w-3-label`, and `w-3-value` all act as one selection for resize/drag handles.
- * Does not match `w-3-icon-*` to value/label (different subtree).
- */
-function layoutTreeSelectionMatchesNode(selectedId, nodeId) {
-    if (!selectedId || !nodeId) return true;
-    if (selectedId === nodeId) return true;
-    const iconRe = /^w-(\d+)-icon-/;
-    if (iconRe.test(selectedId) || iconRe.test(nodeId)) return false;
-    const rowRe = /^w-(\d+)$/;
-    const partRe = /^w-(\d+)-(label|value)$/;
-    const mSelRow = selectedId.match(rowRe);
-    const mNodeRow = nodeId.match(rowRe);
-    const mSelPart = selectedId.match(partRe);
-    const mNodePart = nodeId.match(partRe);
-    const idxSel = mSelRow?.[1] || mSelPart?.[1];
-    const idxNode = mNodeRow?.[1] || mNodePart?.[1];
-    if (idxSel !== undefined && idxNode !== undefined && idxSel === idxNode) {
-        if (mSelRow || mNodeRow) return true;
-        if (mSelPart && mNodePart) return true;
-    }
-    return false;
-}
-
-/** Widget array index for any hierarchy row id: `w-3`, `w-3-label`, `w-3-value`, `w-3-icon-day_night`, … */
-function parseWidgetIndexFromLayoutTreeNodeId(id) {
-    const m = String(id || '').match(/^w-(\d+)/);
-    return m ? Number(m[1]) : -1;
-}
-
 function stripTreeNamePastePrefixes(raw) {
     return String(raw || '')
         .replace(/^row\s*::\s*/i, '')
@@ -1345,6 +1088,145 @@ function bindExplorerRenameHotkeysOnce() {
     );
 }
 
+/** Right-click on LCD edge strips (see ui-bridge.js): same menu as tree row "LCD outline". */
+window._openLcdOutlineTreeContextMenu = (e) => {
+    const node = findLayoutTreeNodeById('lcd-outline', window._currentScreenData || {});
+    if (!node) return;
+    const jp = window._currentJsonPath;
+    if (!jp) return;
+    openTreeContextMenu(e, node, jp, renderScreen);
+};
+
+/** SquareLine-style presets for `data.styles` (see AGENTS.md — single LCD typeface). */
+const LAYOUT_FONT_PRESETS = {
+    hardware: {
+        fontFamily:
+            "'Fira Mono', 'Consolas', 'Cascadia Mono', 'Segoe UI Mono', 'Lucida Console', monospace",
+        fontSize: '18px',
+        fontWeight: '600'
+    },
+    stock: {
+        fontFamily: "system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
+        fontSize: '18px',
+        fontWeight: '600'
+    },
+    compact: {
+        fontFamily: "'Fira Mono', 'Consolas', 'Cascadia Mono', 'Segoe UI Mono', monospace",
+        fontSize: '16px',
+        fontWeight: '600'
+    }
+};
+
+function syncFontManagerPanelFromScreenData() {
+    const d = window._currentScreenData;
+    const fam = document.getElementById('layout-font-family');
+    const sz = document.getElementById('layout-font-size');
+    const wt = document.getElementById('layout-font-weight');
+    if (!fam || !sz || !wt) return;
+    const st = d?.styles || {};
+    fam.value = st.fontFamily != null ? String(st.fontFamily) : '';
+    sz.value = st.fontSize != null ? String(st.fontSize) : '';
+    wt.value = st.fontWeight != null ? String(st.fontWeight) : '';
+    updateFontManagerPreview();
+}
+
+function updateFontManagerPreview() {
+    const prev = document.getElementById('layout-font-preview');
+    if (!prev) return;
+    const famEl = document.getElementById('layout-font-family');
+    const szEl = document.getElementById('layout-font-size');
+    const wtEl = document.getElementById('layout-font-weight');
+    const fam = (famEl?.value || '').trim() || 'monospace';
+    const sz = (szEl?.value || '').trim() || '18px';
+    const wt = (wtEl?.value || '').trim() || '600';
+    prev.style.fontFamily = fam;
+    prev.style.fontSize = sz;
+    prev.style.fontWeight = wt;
+}
+
+function bindLayoutPropsInspectorTabsOnce() {
+    if (window._layoutPropsInspectorTabsBound) return;
+    const panel = document.getElementById('layout-props-panel');
+    const tabs = panel?.querySelectorAll('.layout-props-panel__tab');
+    const inspectorBody = document.getElementById('layout-props-content');
+    const fontPanel = document.getElementById('layout-props-font-panel');
+    const otherPanel = document.getElementById('layout-props-tab-panel-other');
+    if (!tabs?.length || !inspectorBody || !fontPanel || !otherPanel) return;
+    window._layoutPropsInspectorTabsBound = true;
+
+    const otherMsg = otherPanel.querySelector('.layout-props-tab-panel-other__text');
+
+    const activateTab = (tabEl) => {
+        tabs.forEach((t) => {
+            t.classList.toggle('is-active', t === tabEl);
+            t.setAttribute('aria-selected', t === tabEl ? 'true' : 'false');
+        });
+        const label = (tabEl.textContent || '').replace(/\s+/g, ' ').trim();
+        if (label === 'Inspector') {
+            inspectorBody.hidden = false;
+            fontPanel.hidden = true;
+            otherPanel.hidden = true;
+        } else if (label === 'Font Manager') {
+            inspectorBody.hidden = true;
+            fontPanel.hidden = false;
+            otherPanel.hidden = true;
+            syncFontManagerPanelFromScreenData();
+        } else {
+            inspectorBody.hidden = true;
+            fontPanel.hidden = true;
+            otherPanel.hidden = false;
+            if (otherMsg) {
+                otherMsg.textContent = `${label} is not available in the web simulator yet. Use Inspector or Font Manager.`;
+            }
+        }
+    };
+
+    tabs.forEach((tab) => {
+        tab.style.cursor = 'pointer';
+        tab.addEventListener('click', () => activateTab(tab));
+    });
+
+    ['layout-font-family', 'layout-font-size', 'layout-font-weight'].forEach((id) => {
+        document.getElementById(id)?.addEventListener('input', updateFontManagerPreview);
+    });
+
+    fontPanel.querySelectorAll('[data-font-preset]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const key = btn.getAttribute('data-font-preset');
+            const p = LAYOUT_FONT_PRESETS[key];
+            if (!p) return;
+            const fam = document.getElementById('layout-font-family');
+            const sz = document.getElementById('layout-font-size');
+            const wt = document.getElementById('layout-font-weight');
+            if (fam) fam.value = p.fontFamily;
+            if (sz) sz.value = p.fontSize;
+            if (wt) wt.value = p.fontWeight;
+            updateFontManagerPreview();
+        });
+    });
+
+    const applyBtn = document.getElementById('layout-font-apply');
+    if (applyBtn) {
+        applyBtn.addEventListener('click', () => {
+            const d = window._currentScreenData;
+            const jp = window._currentJsonPath;
+            if (!d || !jp) return;
+            if (!d.styles) d.styles = {};
+            const ff = document.getElementById('layout-font-family')?.value.trim() ?? '';
+            const fsz = document.getElementById('layout-font-size')?.value.trim() ?? '';
+            const fw = document.getElementById('layout-font-weight')?.value.trim() ?? '';
+            if (ff) d.styles.fontFamily = ff;
+            else delete d.styles.fontFamily;
+            if (fsz) d.styles.fontSize = fsz;
+            else delete d.styles.fontSize;
+            if (fw) d.styles.fontWeight = fw;
+            else delete d.styles.fontWeight;
+            saveScreenToCache(jp, d);
+            renderScreen(jp);
+        });
+    }
+}
+
 /** Logical Y inside LCD (0 = top) from screen coordinates; correct when the bezel is CSS-scaled. */
 function lcdClientYToLocalY(clientY, lcdElement) {
     if (!lcdElement) return 0;
@@ -1468,7 +1350,8 @@ function syncSlStudioWorkbenchChrome(jsonPath, data) {
     }
     if (screenEl && data) {
         const p = data.page || '';
-        screenEl.textContent = p ? String(p).replace(/_/g, ' ') : 'Screen';
+        const reg = p ? SCREENS_BY_PAGE[p] : null;
+        screenEl.textContent = reg?.displayName || (p ? String(p).replace(/_/g, ' ') : 'Screen');
     }
     if (zoomEl && typeof window._tstatZoom === 'number') {
         zoomEl.textContent = `${Math.round(window._tstatZoom * 100)}%`;
@@ -1479,7 +1362,8 @@ function applyRowSlotReorderAtLocalY(draggedWidget, localY, widgets, menuRowPixe
     if (!isRowSlotWidget(draggedWidget) || !Array.isArray(widgets)) return false;
     const h = Math.max(24, menuRowPixelHeight);
     const maxRow = Math.max(1, Math.floor(Math.max(h, Number(canvasLogicalHeight) || DEFAULT_LCD_H) / h));
-    const targetRow = Math.max(1, Math.min(maxRow, Math.floor(localY / h) + 1));
+    // Half-row rounding: line + drop target sit on the boundary between bands (not the top of the band).
+    const targetRow = Math.max(1, Math.min(maxRow, Math.floor(localY / h + 0.5) + 1));
 
     const blocker = widgets.find(
         (w) => normalizeLcdRowSlot(w.lcdRow) === targetRow && !isRowSlotWidget(w) && w.type !== 'button'
@@ -1502,247 +1386,6 @@ function applyRowSlotReorderAtLocalY(draggedWidget, localY, widgets, menuRowPixe
         return true;
     }
     return false;
-}
-
-/** Fixed shell DOM in `Tstat10.html`; tree ids match `data-tree-node-id` (not screen JSON widgets). */
-const SHELL_REFERENCE_PHOTO_TREE_ID = 'shell-ref-photo';
-const SHELL_HARDWARE_GROUP_TREE_ID = 'shell-hardware-buttons';
-const TSTAT_BODY_FOLDER_ID = 'tstat-body';
-const SHELL_HARDWARE_BUTTON_ROWS = [
-    { treeId: 'shell-hw-left', role: 'left', label: '◀ Left', mapsTo: 'ArrowLeft' },
-    { treeId: 'shell-hw-down', role: 'down', label: '▼ Down', mapsTo: 'ArrowDown' },
-    { treeId: 'shell-hw-up', role: 'up', label: '▲ Up', mapsTo: 'ArrowUp' },
-    { treeId: 'shell-hw-right', role: 'right', label: '▶ Right', mapsTo: 'ArrowRight' }
-];
-
-/** Device chrome only — shown once under **Tstatbody** in the hierarchy (not duplicated per screen JSON). */
-function buildTstatShellTreeNodes() {
-    const nodes = [];
-    nodes.push({
-        id: TSTAT_BODY_FOLDER_ID,
-        text: 'Tstatbody',
-        icon: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5 6h6M5 9h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
-        status: 'ok',
-        widget: null,
-        indent: 0,
-        childKind: 'tstat_body_folder'
-    });
-    nodes.push({
-        id: 'shell-device-bezel',
-        text: 'Device bezel',
-        icon: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.2"/><rect x="4.5" y="5" width="7" height="6" rx="0.8" fill="currentColor" opacity=".2"/></svg>',
-        status: 'ok',
-        widget: null,
-        indent: 1,
-        childKind: 'shell_bezel'
-    });
-    nodes.push({
-        id: 'lcd-outline',
-        text: 'LCD outline (viewport)',
-        icon: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="3" width="11" height="9" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5 14h6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
-        status: 'ok',
-        widget: null,
-        indent: 1,
-        childKind: 'lcd_outline'
-    });
-    nodes.push({
-        id: 'shell-compass-logo',
-        text: 'Compass / logo artwork',
-        icon: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M8 3v2M8 11v2M3 8h2M11 8h2" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>',
-        status: 'ok',
-        widget: null,
-        indent: 1,
-        childKind: 'shell_compass_logo'
-    });
-    nodes.push({
-        id: SHELL_HARDWARE_GROUP_TREE_ID,
-        text: 'Hardware buttons (simulated)',
-        icon: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="6" width="3.2" height="5" rx="0.5" fill="currentColor" opacity=".45"/><rect x="6.4" y="6" width="3.2" height="5" rx="0.5" fill="currentColor" opacity=".45"/><rect x="11.3" y="6" width="3.2" height="5" rx="0.5" fill="currentColor" opacity=".45"/><path d="M8 2.5v2.5M8 11v2.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
-        status: 'ok',
-        widget: null,
-        indent: 1,
-        childKind: 'shell_hw_group'
-    });
-    SHELL_HARDWARE_BUTTON_ROWS.forEach((row) => {
-        nodes.push({
-            id: row.treeId,
-            text: `Key :: ${row.label} → ${row.mapsTo}`,
-            icon: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M8 6v4M6 8h4" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>',
-            status: 'ok',
-            widget: null,
-            indent: 2,
-            childKind: 'shell_hw_button',
-            shellHwRole: row.role
-        });
-    });
-    nodes.push({
-        id: SHELL_REFERENCE_PHOTO_TREE_ID,
-        text: 'Thermostat reference image',
-        icon: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="9" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/><circle cx="5.5" cy="6.5" r="1.2" fill="currentColor" opacity=".35"/><path d="M9 9l4 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
-        status: 'ok',
-        widget: null,
-        indent: 1,
-        childKind: 'shell_ref_photo'
-    });
-    nodes.push({
-        id: 'shell-lock-control',
-        text: 'Layout lock (bezel)',
-        icon: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="7" width="8" height="6" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M6 7V5a2 2 0 0 1 4 0v2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
-        status: 'ok',
-        widget: null,
-        indent: 1,
-        childKind: 'shell_lock_control'
-    });
-    return nodes;
-}
-
-/** Screen JSON widgets only (LCD content). Shell chrome lives in `buildTstatShellTreeNodes`. */
-function buildPageNodes(data) {
-    const iconForWidget = (w) => {
-        if (w.type === 'button') {
-            return '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5 8h6" stroke="currentColor" stroke-width="1.4"/></svg>';
-        }
-        if (w.type === 'menu_row') {
-            return '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4h10M3 8h10M3 12h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
-        }
-        if (w.type === 'box') {
-            return '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>';
-        }
-        if (w.type === 'header') {
-            return '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3v10M13 3v10M3 8h10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
-        }
-        if (w.type === 'label' && typeof w.text === 'string' && w.text.includes('<svg')) {
-            return '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2l4.5 3v6L8 14l-4.5-3V5L8 2z" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="1.6" fill="currentColor"/></svg>';
-        }
-        if (w.type === 'label') {
-            return '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M8 4v8M5 12h6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
-        }
-        if (w.type === 'blank') {
-            return '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="1.6" fill="currentColor"/></svg>';
-        }
-        return '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>';
-    };
-
-    const widgets = data.widgets || [];
-    const byId = new Map();
-    widgets.forEach((w, i) => {
-        if (w && w.id) byId.set(w.id, i);
-    });
-    const nodes = [];
-
-    const nodeTitleFor = (w) => {
-        if (w.type === 'label' && (w.libraryIconName || w.libraryIconId)) {
-            return `Icon :: ${w.libraryIconName || w.libraryIconId}`;
-        }
-        if (w.type === 'label' && typeof w.text === 'string' && w.text.includes('<svg')) {
-            return `Icon :: ${w.id || 'SVG Icon'}`;
-        }
-        if (w.type === 'menu_row') {
-            return `Row :: ${getWidgetTreeName(w)}`;
-        }
-        return `${w.type || 'item'} :: ${getWidgetTreeName(w)}`;
-    };
-
-    const pushSyntheticForWidget = (w, i, indent) => {
-        if (w.id === 'main_icons_group') {
-            const parts = [
-                { key: 'day_night', label: 'Icon :: Day/Night' },
-                { key: 'occupied', label: 'Icon :: Occupied' },
-                { key: 'heat_cool', label: 'Icon :: Heat/Cool' },
-                { key: 'fan', label: 'Icon :: Fan' }
-            ];
-            parts.forEach((p, pIdx) => {
-                const iconBinding = w.t3IconBindings?.[p.key] || '';
-                nodes.push({
-                    id: `w-${i}-icon-${p.key}`,
-                    text: iconBinding ? `${p.label} [${iconBinding}]` : p.label,
-                    icon: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>',
-                    status: 'ok',
-                    widget: w,
-                    indent,
-                    childKind: 'group_icon',
-                    groupPartIndex: pIdx
-                });
-            });
-        }
-        if (w.type === 'menu_row') {
-            nodes.push({
-                id: `w-${i}-label`,
-                text: `label text :: ${w.label || ''}`,
-                icon: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M8 4v8M5 12h6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
-                status: 'ok',
-                widget: w,
-                indent,
-                childKind: 'label'
-            });
-            nodes.push({
-                id: `w-${i}-value`,
-                text: `edit box :: ${(w.t3ValueBinding ? `[${w.t3ValueBinding}] ` : '')}${(w.value ?? '').toString()}`,
-                icon: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="3" width="11" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M5 8h6" stroke="currentColor" stroke-width="1.2"/></svg>',
-                status: 'ok',
-                widget: w,
-                indent,
-                childKind: 'value'
-            });
-        }
-    };
-
-    const MAX_TREE_DEPTH = 96;
-    /** True only when this widget can be a parent in the tree (parentId links use string ids). */
-    const canBeParent = (w) => {
-        const id = w && w.id;
-        return typeof id === 'string' && id.length > 0;
-    };
-    const emitSubtree = (w, i, depth, visited) => {
-        if (!w) return;
-        if (depth > MAX_TREE_DEPTH) {
-            console.warn('[buildPageNodes] Max widget tree depth exceeded; check parentId chain at index', i);
-            return;
-        }
-        if (visited.has(i)) {
-            console.warn('[buildPageNodes] parentId cycle detected; skipping subtree at index', i);
-            return;
-        }
-        visited.add(i);
-        try {
-            const nodeTitle = nodeTitleFor(w);
-            nodes.push({
-                id: `w-${i}`,
-                text: nodeTitle,
-                icon: iconForWidget(w),
-                status: (w.id || w.label || w.text) ? 'ok' : 'warn',
-                widget: w,
-                widgetIndex: i,
-                indent: depth,
-                childKind: 'widget'
-            });
-            pushSyntheticForWidget(w, i, depth + 1);
-            const parentId = canBeParent(w) ? w.id : null;
-            const children = widgets
-                .map((child, idx) => ({ child, idx }))
-                .filter(({ child }) => child && parentId != null && child.parentId === parentId)
-                .sort((a, b) => a.idx - b.idx);
-            children.forEach(({ idx }) => emitSubtree(widgets[idx], idx, depth + 1, visited));
-        } finally {
-            visited.delete(i);
-        }
-    };
-
-    const rootIndices = [];
-    widgets.forEach((w, i) => {
-        if (!w) return;
-        if (!w.parentId || !byId.has(w.parentId)) rootIndices.push(i);
-    });
-    rootIndices.sort((a, b) => a - b);
-    rootIndices.forEach((i) => emitSubtree(widgets[i], i, 0, new Set()));
-    return nodes;
-}
-
-function findLayoutTreeNodeById(id, data) {
-    if (!id) return null;
-    const shellHit = buildTstatShellTreeNodes().find((n) => n.id === id);
-    if (shellHit) return shellHit;
-    return buildPageNodes(data).find((n) => n.id === id);
 }
 
 function openPropertyEditorMenu(e, node, onApply) {
@@ -1938,16 +1581,7 @@ function renderLayoutTreePanel(data, jsonPath, rerender) {
     if (!isEdit) return;
     content.innerHTML = '';
 
-    const screenNodes = [
-        { key: 'main', name: 'Home' },
-        { key: 'setup', name: 'Setup Menu' },
-        { key: 'ethernet', name: 'WiFi Setup' },
-        { key: 'provisioning', name: 'Provisioning' },
-        { key: 'settings', name: 'RS485 Settings' },
-        { key: 'clock', name: 'Clock Setup' },
-        { key: 'oat', name: 'Outside Air Temp' },
-        { key: 'tbd', name: 'To Be Done' }
-    ];
+    const screenNodes = SCREENS_REGISTRY.map((s) => ({ key: s.routeKey, name: s.displayName }));
     if (!window._layoutTreeExpandedPages) window._layoutTreeExpandedPages = { [jsonPath]: true };
     if (typeof window._layoutTreeExpandedTstatbody !== 'boolean') window._layoutTreeExpandedTstatbody = true;
     const pageNodes = buildPageNodes(data);
@@ -2028,7 +1662,14 @@ function renderLayoutTreePanel(data, jsonPath, rerender) {
             });
         }
         const status = document.createElement('span');
-        status.className = `layout-tree-node__status ${n.status === 'warn' ? 'is-warning' : 'is-event'}`;
+        if (n.id === 'lcd-outline' && window._tstatLcdOutlineLocked) {
+            status.className = 'layout-tree-node__status layout-tree-node__status--lcd-locked';
+            status.setAttribute('aria-label', 'LCD outline locked');
+            status.innerHTML =
+                '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="5" y="8" width="6" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M6 8V6a2 2 0 0 1 4 0v2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
+        } else {
+            status.className = `layout-tree-node__status ${n.status === 'warn' ? 'is-warning' : 'is-event'}`;
+        }
         div.appendChild(chevronSp);
         div.appendChild(icon);
         div.appendChild(label);
@@ -2185,14 +1826,21 @@ function renderLayoutTreePanel(data, jsonPath, rerender) {
                     toWidget.lcdRow = aRow;
                 } else if (fromIsLabelLike && toIsLabelLike) {
                     fromWidget.parentId = toWidget.parentId;
-                    const ax = Number(fromWidget.x || 0);
-                    const ay = Number(fromWidget.y || 0);
-                    const bx = Number(toWidget.x || 0);
-                    const by = Number(toWidget.y || 0);
-                    fromWidget.x = bx;
-                    fromWidget.y = by;
-                    toWidget.x = ax;
-                    toWidget.y = ay;
+                    const sideReorder = evt.clientY - rect.top < rect.height / 2 ? 'top' : 'bottom';
+                    const moved = widgets.splice(fromIdx, 1)[0];
+                    const insertRef = widgets.findIndex((w) => w === toWidget);
+                    if (insertRef < 0) {
+                        widgets.splice(Math.min(fromIdx, widgets.length), 0, moved);
+                        return;
+                    }
+                    const insertAt = sideReorder === 'top' ? insertRef : insertRef + 1;
+                    widgets.splice(insertAt, 0, moved);
+                    normalizeWidgetTreeOrder(widgets);
+                    const ni = widgets.indexOf(moved);
+                    window._layoutSelectedNodeId = ni >= 0 ? `w-${ni}` : n.id;
+                    window._layoutTreeDragNodeId = null;
+                    rerender(jsonPath);
+                    return;
                 } else {
                     fromWidget.parentId = toWidget.parentId;
                     const tmp = widgets[fromIdx];
@@ -2604,7 +2252,6 @@ function renderLayoutTreePanel(data, jsonPath, rerender) {
 function renderLayoutPropertiesPanel(data, jsonPath, rerender) {
     const panel = document.getElementById('layout-props-panel');
     const content = document.getElementById('layout-props-content');
-    const header = panel?.querySelector('.layout-props-panel__header');
     if (!panel || !content) return;
     /* Inspector drag: attachFloatingPanelDrag(layout-props header) in ensureFloatingPanelsDragBound */
     const isEdit = !!window._isVisualEditMode;
@@ -2629,8 +2276,10 @@ function renderLayoutPropertiesPanel(data, jsonPath, rerender) {
         hint.style.color = '#475569';
         hint.style.fontSize = '12px';
         hint.style.lineHeight = '1.45';
-        hint.textContent =
-            'Drag the highlighted edge strips on the device to move the LCD in the shell. Alt+arrow keys still nudge; Fit resets pan, zoom, and this offset.';
+        const outlineLocked = !!window._tstatLcdOutlineLocked;
+        hint.textContent = outlineLocked
+            ? 'LCD outline is locked: drag and Alt+arrow nudge are disabled. Right-click the outline on the device or use the tree context menu to unlock.'
+            : 'Drag the highlighted edge strips on the device to move the LCD in the shell. Alt+arrow keys nudge; right-click the outline to lock. Fit resets pan, zoom, and this offset.';
         content.appendChild(hint);
         const sec = document.createElement('div');
         sec.className = 'layout-props-section';
@@ -2646,6 +2295,7 @@ function renderLayoutPropertiesPanel(data, jsonPath, rerender) {
         inX.type = 'number';
         inX.id = 'layout-lcd-nudge-x';
         inX.value = String(Math.round(Number(window._tstatLcdNudgeX) || 0));
+        inX.disabled = outlineLocked;
         rowX.appendChild(labX);
         rowX.appendChild(inX);
         sec.appendChild(rowX);
@@ -2657,6 +2307,7 @@ function renderLayoutPropertiesPanel(data, jsonPath, rerender) {
         inY.type = 'number';
         inY.id = 'layout-lcd-nudge-y';
         inY.value = String(Math.round(Number(window._tstatLcdNudgeY) || 0));
+        inY.disabled = outlineLocked;
         rowY.appendChild(labY);
         rowY.appendChild(inY);
         sec.appendChild(rowY);
@@ -2665,7 +2316,9 @@ function renderLayoutPropertiesPanel(data, jsonPath, rerender) {
         actions.className = 'layout-props-actions';
         const apply = document.createElement('button');
         apply.textContent = 'Apply';
+        apply.disabled = outlineLocked;
         apply.onclick = () => {
+            if (window._tstatLcdOutlineLocked) return;
             const nx = Math.round(Number(inX.value) || 0);
             const ny = Math.round(Number(inY.value) || 0);
             window._tstatLcdNudgeX = nx;
@@ -2683,7 +2336,9 @@ function renderLayoutPropertiesPanel(data, jsonPath, rerender) {
         };
         const reset = document.createElement('button');
         reset.textContent = 'Reset offset';
+        reset.disabled = outlineLocked;
         reset.onclick = () => {
+            if (window._tstatLcdOutlineLocked) return;
             inX.value = '0';
             inY.value = '0';
             apply.click();
@@ -3040,19 +2695,19 @@ function renderLayoutPropertiesPanel(data, jsonPath, rerender) {
         try {
             console.log('[Scenario] starting...');
             // 1) Go Home
-            window.navigateTo('main');
+            window.navigateTo(ROUTE_KEY.MAIN);
             await wait(120);
-            if (window._currentScreenData?.page !== 'MAIN_DISPLAY') throw new Error('not on MAIN_DISPLAY');
+            if (window._currentScreenData?.page !== PAGE.MAIN) throw new Error(`expected page ${PAGE.MAIN}`);
             log.push('home');
             // 2) Go Setup
-            window.navigateTo('setup');
+            window.navigateTo(ROUTE_KEY.SETUP);
             await wait(120);
-            if (window._currentScreenData?.page !== 'SETUP_MENU') throw new Error('not on SETUP_MENU');
+            if (window._currentScreenData?.page !== PAGE.SETUP) throw new Error(`expected page ${PAGE.SETUP}`);
             log.push('setup');
             // 3) Go WiFi
-            window.navigateTo('ethernet');
+            window.navigateTo(ROUTE_KEY.WIFI);
             await wait(120);
-            if (window._currentScreenData?.page !== 'WIFI_SETTINGS') throw new Error('not on WIFI_SETTINGS');
+            if (window._currentScreenData?.page !== PAGE.WIFI) throw new Error(`expected page ${PAGE.WIFI}`);
             log.push('wifi');
             // 4) Enter edit mode (bezel lock or panel Edit — Widgets panel is hidden until edit)
             if (!window._isVisualEditMode) {
@@ -3134,7 +2789,7 @@ function applySelectionOutline() {
 window._cancelDebouncedSelectLayoutRender = cancelDebouncedSelectLayoutRender;
 
 function setupMainTickerSimulation(data) {
-    if (!data || data.page !== 'MAIN_DISPLAY') {
+    if (!data || data.page !== PAGE.MAIN) {
         if (window._tickerTimer) {
             clearInterval(window._tickerTimer);
             window._tickerTimer = null;
@@ -3269,7 +2924,7 @@ function postToOptionalLocalSaveServer(activeJsonPath, jsonString) {
         .catch(() => {
             try {
                 sessionStorage.setItem(TSTAT_SKIP_SAVE_SERVER_KEY, '1');
-            } catch (_) {
+            } catch {
                 /* ignore */
             }
             console.debug(
@@ -3281,7 +2936,7 @@ function postToOptionalLocalSaveServer(activeJsonPath, jsonString) {
 window.__tstat_resetOptionalSaveServerProbe = () => {
     try {
         sessionStorage.removeItem(TSTAT_SKIP_SAVE_SERVER_KEY);
-    } catch (_) {
+    } catch {
         /* ignore */
     }
 };
@@ -3427,7 +3082,7 @@ const PROV_RSSI_QUALITY_ROW_WIDGET = {
  * Canonical order: AP=3, Pass=4, Status=5, RSSI=6, Signal=7.
  */
 function ensureProvisioningSetupHasRssi(data) {
-    if (data?.page !== 'PROVISIONING_SETUP' || !Array.isArray(data.widgets)) return;
+    if (data?.page !== PAGE.PROVISIONING || !Array.isArray(data.widgets)) return;
     const widgets = data.widgets;
     const cw = canvasLogicalWidthPx(data);
     const ch = canvasLogicalHeightPx(data);
@@ -3515,10 +3170,10 @@ function clearProvisioningFlowTimers() {
 
 /** After Requesting: apply password from phone app (simulated); then Success → WiFi connected. */
 function runProvisioningSuccessExchange(jsonPath) {
-    const path = jsonPath || window._currentJsonPath || ROUTE_TO_JSON_PATH.provisioning;
+    const path = jsonPath || window._currentJsonPath || ROUTE_TO_JSON_PATH[ROUTE_KEY.PROVISIONING];
     const data = window._currentScreenData;
     if (!data?.widgets) return;
-    if (data.page !== 'PROVISIONING_SETUP' && !String(path).includes('provisioning_setup')) return;
+    if (data.page !== PAGE.PROVISIONING && !jsonPathMatchesRoute(path, 'provisioning')) return;
 
     const pass = data.widgets.find((w) => w && w.id === 'ui_item_prov_pass');
     const st = data.widgets.find((w) => w && w.id === 'ui_item_prov_status');
@@ -3531,7 +3186,7 @@ function runProvisioningSuccessExchange(jsonPath) {
     window.clearTimeout(window._provWifiTimer);
     window._provWifiTimer = window.setTimeout(() => {
         const d = window._currentScreenData;
-        if (!d || d.page !== 'PROVISIONING_SETUP') return;
+        if (!d || d.page !== PAGE.PROVISIONING) return;
         const st2 = d.widgets?.find((w) => w && w.id === 'ui_item_prov_status');
         if (st2 && String(st2.value) === 'Success') {
             st2.value = 'WiFi connected';
@@ -3542,9 +3197,9 @@ function runProvisioningSuccessExchange(jsonPath) {
 }
 
 function startProvisioningConnectFlow(jsonPath) {
-    const path = jsonPath || window._currentJsonPath || ROUTE_TO_JSON_PATH.provisioning;
+    const path = jsonPath || window._currentJsonPath || ROUTE_TO_JSON_PATH[ROUTE_KEY.PROVISIONING];
     const data = window._currentScreenData;
-    if (!data || data.page !== 'PROVISIONING_SETUP') return;
+    if (!data || data.page !== PAGE.PROVISIONING) return;
     const st0 = data.widgets?.find((w) => w && w.id === 'ui_item_prov_status');
     const busy = st0 && ['Connecting', 'Requesting'].includes(String(st0.value));
     if (busy) return;
@@ -3557,7 +3212,7 @@ function startProvisioningConnectFlow(jsonPath) {
 
     window._provConnectTimer = window.setTimeout(() => {
         const d = window._currentScreenData;
-        if (!d || d.page !== 'PROVISIONING_SETUP') return;
+        if (!d || d.page !== PAGE.PROVISIONING) return;
         const s2 = d.widgets?.find((w) => w && w.id === 'ui_item_prov_status');
         if (s2 && String(s2.value) === 'Connecting') {
             s2.value = 'Requesting';
@@ -3568,7 +3223,7 @@ function startProvisioningConnectFlow(jsonPath) {
 
     window._provConnectTimer2 = window.setTimeout(() => {
         const d = window._currentScreenData;
-        if (!d || d.page !== 'PROVISIONING_SETUP') return;
+        if (!d || d.page !== PAGE.PROVISIONING) return;
         const s3 = d.widgets?.find((w) => w && w.id === 'ui_item_prov_status');
         if (!s3 || String(s3.value) !== 'Requesting') return;
         if (shouldProvSimulateFailure()) {
@@ -3608,7 +3263,7 @@ function handleProvisioningArrowKey(e) {
         e.preventDefault();
         window._ipEditMode = false;
         window._valueEditMode = false;
-        window.navigateTo('setup');
+        window.navigateTo(ROUTE_KEY.SETUP);
         return true;
     }
     if (e.key === 'Enter') {
@@ -3617,7 +3272,7 @@ function handleProvisioningArrowKey(e) {
         if (bf === 0) {
             startProvisioningConnectFlow(path);
         } else {
-            window.navigateTo('setup');
+            window.navigateTo(ROUTE_KEY.SETUP);
         }
         return true;
     }
@@ -3630,7 +3285,7 @@ function syncThermostatShellLockButtonVisibility() {
     if (!btn) return;
     const path = String(window._currentJsonPath || '');
     const page = window._currentScreenData?.page;
-    const onProv = page === 'PROVISIONING_SETUP' || path.includes('provisioning_setup');
+    const onProv = page === PAGE.PROVISIONING || jsonPathMatchesRoute(path, 'provisioning');
     btn.classList.toggle('thermostat-shell-lock-btn--hidden', onProv);
 }
 
@@ -3643,6 +3298,7 @@ export async function renderScreen(jsonPath) {
     try {
     cancelDebouncedSelectLayoutRender();
     bindExplorerRenameHotkeysOnce();
+    bindLayoutPropsInspectorTabsOnce();
     // Track active screen path immediately so lock/save actions always apply to current page.
     window._currentJsonPath = jsonPath;
     saveLastScreenPath(jsonPath);
@@ -3754,7 +3410,7 @@ export async function renderScreen(jsonPath) {
     const redboxToggle = document.getElementById('toggle-redbox');
     if (redboxToggle) {
         if (!redboxToggle._redboxListenerAttached) {
-            redboxToggle.addEventListener('change', (e) => {
+            redboxToggle.addEventListener('change', () => {
                 window._tstatShowRedbox = redboxToggle.checked;
                 renderScreen(jsonPath);
             });
@@ -3836,9 +3492,23 @@ export async function renderScreen(jsonPath) {
 
     // Only fetch JSON and set window._networkSettingsData if not already set (preserve user changes)
     let data;
+    let screenLoadSchemaFailed = false;
+    const abortIfScreenJsonInvalid = (parsed) => {
+        const schemaErr = getScreenJsonSchemaErrorSummary(parsed);
+        if (!schemaErr) return false;
+        const msg = `Screen JSON schema error (${jsonPath}):\n${schemaErr}`;
+        console.error('[Simulator]', msg);
+        writeStatus('Screen JSON failed schema validation.', true);
+        lcd.innerHTML = `<div style="color:#c62828;padding:16px;font:14px system-ui;white-space:pre-wrap;border:1px solid #ffcdd2;background:#ffebee;">${escapeHtml(msg)}</div>`;
+        window._currentScreenData = null;
+        window._lastLoadedJsonPath = null;
+        screenLoadSchemaFailed = true;
+        return true;
+    };
     // Check if we already have the data loaded for this specific screen
     if (!window._currentScreenData || window._lastLoadedJsonPath !== jsonPath) {
         const applyFetched = (parsed) => {
+            if (abortIfScreenJsonInvalid(parsed)) return;
             data = parsed;
             window._currentScreenData = data;
             window._lastLoadedJsonPath = jsonPath;
@@ -3853,7 +3523,8 @@ export async function renderScreen(jsonPath) {
         };
         const loadFromNetwork = async () => {
             const resp = await fetch(jsonPath + '?_=' + Date.now());
-            applyFetched(await resp.json());
+            const parsed = await resp.json();
+            applyFetched(parsed);
         };
 
         // Prefer browser draft (localStorage) whenever present so Inspector edits (bg, theme, workbench offsets)
@@ -3872,7 +3543,13 @@ export async function renderScreen(jsonPath) {
             }
         }
     }
+    if (screenLoadSchemaFailed) return;
     data = window._currentScreenData;
+    if (!data) {
+        lcd.innerHTML = `<div style="color:red; padding: 20px;">No screen data for ${escapeHtml(String(jsonPath))}</div>`;
+        return;
+    }
+    if (abortIfScreenJsonInvalid(data)) return;
     ensureCanonicalSchema(data);
     enforceSimulatorFixedLcdCanvas(data);
     ensureProvisioningSetupHasRssi(data);
@@ -3887,11 +3564,9 @@ export async function renderScreen(jsonPath) {
     renderLayoutTreePanel(data, jsonPath, renderScreen);
     renderLayoutPropertiesPanel(data, jsonPath, renderScreen);
     const gridCols = data.layout?.lcdTextColumns || 16;
-    const gridRows = data.layout?.lcdTextRows || 10;
     const canvasWidthPx = canvasLogicalWidthPx(data);
     const canvasHeightPx = canvasLogicalHeightPx(data);
     const gridCellW = canvasWidthPx / gridCols;
-    const gridCellH = canvasHeightPx / gridRows;
     const quarterCharStep = gridCellW / 4;
 
     function snapToGrid(valuePx, stepPx) {
@@ -4456,7 +4131,95 @@ export async function renderScreen(jsonPath) {
             }
         };
 
-        const rebuildEditorBgPalette = () => {
+        function mergeHardwareBackgroundSwatches() {
+            const seen = new Set();
+            const out = [];
+            const push = (word, label) => {
+                const w = Number(word);
+                if (!Number.isFinite(w) || w < 0 || w > 0xffff || seen.has(w)) return;
+                seen.add(w);
+                out.push({ word: w, label: String(label || '') });
+            };
+            for (const s of LCD_THEME_RGB565_SWATCHES) push(s.word, s.label);
+            for (const t of FIRMWARE_LCD_COLOR_THEME_LIST) push(t.background565, t.label);
+            return out;
+        }
+
+        function applySwatchPick(cssHex, forceReducedRgb) {
+            if (forceReducedRgb && colorModeInput) colorModeInput.value = 'reduced_rgb';
+            if (bgInput) bgInput.value = cssHex;
+            syncBgPickerFromText();
+            onFieldChange();
+            commitProjectWideBackgroundIfPossible();
+            rebuildEditorBgPalette();
+            updateBgSwatchActiveState();
+            syncFirmwareThemeSelect();
+        }
+
+        function appendHardwareRgbRow(forceReducedRgb) {
+            for (const row of mergeHardwareBackgroundSwatches()) {
+                const css = rgb565ToCssHex(row.word);
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.className = 'layout-props-screen-section__bg-swatch';
+                b.title = `${row.label} — RGB565 0x${row.word.toString(16)}`;
+                b.setAttribute('aria-label', row.label);
+                b.dataset.bgCss = css;
+                b.style.backgroundColor = css;
+                b.addEventListener('click', () => applySwatchPick(css, forceReducedRgb));
+                bgPalette.appendChild(b);
+            }
+        }
+
+        function appendCustomBgSwatchButtons(forceReducedRgb) {
+            for (const c of loadCustomBgSwatches()) {
+                const css = quantizeCssColorToRgb565Hex(c.hex) || c.hex;
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.className = 'layout-props-screen-section__bg-swatch layout-props-screen-section__bg-swatch--custom';
+                b.title = `${c.label} — custom (right-click to remove)`;
+                b.setAttribute('aria-label', c.label);
+                b.dataset.bgCss = css;
+                b.style.backgroundColor = css;
+                b.dataset.customBg = '1';
+                b.addEventListener('click', () => applySwatchPick(css, forceReducedRgb));
+                b.addEventListener('contextmenu', (ev) => {
+                    ev.preventDefault();
+                    removeCustomBgSwatchEntry(c.hex);
+                    rebuildEditorBgPalette();
+                    updateBgSwatchActiveState();
+                });
+                bgPalette.appendChild(b);
+            }
+        }
+
+        function appendAddCustomSwatchButton() {
+            const addSave = document.createElement('button');
+            addSave.type = 'button';
+            addSave.className = 'layout-props-screen-section__bg-swatch-add';
+            addSave.textContent = '+';
+            addSave.title =
+                'Save current background as a custom swatch (#RRGGBB, RGB565-quantized). Right-click a custom tile to remove.';
+            addSave.setAttribute('aria-label', 'Add custom background swatch');
+            addSave.addEventListener('click', () => {
+                const raw = (bgInput?.value || '').trim();
+                const base = raw || TSTAT10_FW_BG_CSS;
+                let hex = quantizeCssColorToRgb565Hex(base);
+                if (!hex) {
+                    writeStatus('Enter a parseable CSS color, or switch to reduced_rgb for the color picker.', true);
+                    return;
+                }
+                if (addCustomBgSwatchEntry(hex, raw || hex)) {
+                    rebuildEditorBgPalette();
+                    writeStatus('Custom swatch saved in this browser.', false);
+                } else {
+                    writeStatus('That color is already in custom swatches (or invalid).', true);
+                }
+            });
+            bgPalette.appendChild(addSave);
+        }
+
+        function rebuildEditorBgPalette() {
             if (!bgPalette) return;
             const mode = colorModeInput.value || 'indexed';
             bgPalette.replaceChildren();
@@ -4478,30 +4241,22 @@ export async function renderScreen(jsonPath) {
                     });
                     bgPalette.appendChild(b);
                 }
+                const hint = document.createElement('div');
+                hint.className = 'layout-props-screen-section__bg-palette-hint';
+                hint.textContent =
+                    'Stock + every firmware theme background (RGB565). Clicking switches Color mode to reduced_rgb. “+” saves the current color; right-click a custom tile to remove it.';
+                bgPalette.appendChild(hint);
+                appendHardwareRgbRow(true);
+                appendCustomBgSwatchButtons(true);
             } else {
-                for (const t of LCD_THEME_RGB565_SWATCHES) {
-                    const css = rgb565ToCssHex(t.word);
-                    const b = document.createElement('button');
-                    b.type = 'button';
-                    b.className = 'layout-props-screen-section__bg-swatch';
-                    b.title = `${t.label} — 0x${t.word.toString(16)}`;
-                    b.setAttribute('aria-label', t.label);
-                    b.dataset.bgCss = css;
-                    b.style.backgroundColor = css;
-                    b.addEventListener('click', () => {
-                        if (bgInput) bgInput.value = css;
-                        syncBgPickerFromText();
-                        onFieldChange();
-                        commitProjectWideBackgroundIfPossible();
-                        updateBgSwatchActiveState();
-                    });
-                    bgPalette.appendChild(b);
-                }
+                appendHardwareRgbRow(false);
+                appendCustomBgSwatchButtons(false);
             }
+            appendAddCustomSwatchButton();
             if (bgPicker) bgPicker.hidden = mode === 'indexed';
             syncBgPickerFromText();
             updateBgSwatchActiveState();
-        };
+        }
 
         const syncCanvasSizeReadout = () => {
             if (!canvasSizeReadout) return;
@@ -4588,6 +4343,7 @@ export async function renderScreen(jsonPath) {
             }
             rebuildEditorBgPalette();
             syncFirmwareThemeSelect();
+            syncFontManagerPanelFromScreenData();
         };
 
         const applyCanvasFromInputs = () => {
@@ -4832,7 +4588,7 @@ export async function renderScreen(jsonPath) {
             DEFAULT_LCD_H) || DEFAULT_LCD_H;
     lcd.style.width = lcdCanvasWidth + 'px';
     lcd.style.height = lcdCanvasHeight + 'px';
-    if (data.page === 'MAIN_DISPLAY') {
+    if (data.page === PAGE.MAIN) {
         lcd.style.overflow = 'hidden';
     } else {
         lcd.style.removeProperty('overflow');
@@ -4842,8 +4598,9 @@ export async function renderScreen(jsonPath) {
     }
 
     // Helper to show the alignment context menu during Visual Edit Mode
-    const showAlignmentMenu = (e, widget, alignKey) => {
+    const showAlignmentMenu = (e, widget, alignKey, ctx = {}) => {
         e.preventDefault();
+        e.stopPropagation();
         let existingMenu = document.getElementById('visual-edit-context-menu');
         if (existingMenu) existingMenu.remove();
         
@@ -4860,6 +4617,44 @@ export async function renderScreen(jsonPath) {
         menu.style.display = 'flex';
         menu.style.flexDirection = 'column';
         menu.style.padding = '5px';
+
+        const { editTreeNodeId, moveGroupBaseTreeNodeId } = ctx;
+        const screenData = window._currentScreenData || data;
+        let quickCount = 0;
+        if (editTreeNodeId && lcdElementHasInlineEditHost(editTreeNodeId)) {
+            const edBtn = document.createElement('button');
+            edBtn.type = 'button';
+            edBtn.textContent = 'Edit text here';
+            edBtn.style.margin = '2px';
+            edBtn.style.cursor = 'pointer';
+            edBtn.onclick = () => {
+                tryInvokeInlineEditForTreeNodeId(editTreeNodeId);
+                menu.remove();
+            };
+            menu.appendChild(edBtn);
+            quickCount++;
+        }
+        const moveBase = moveGroupBaseTreeNodeId || editTreeNodeId;
+        const grpSel = moveBase ? resolveParentGroupSelectionTreeNodeId(screenData, moveBase) : null;
+        if (grpSel) {
+            const mgBtn = document.createElement('button');
+            mgBtn.type = 'button';
+            mgBtn.textContent = 'Select parent group to move';
+            mgBtn.style.margin = '2px';
+            mgBtn.style.cursor = 'pointer';
+            mgBtn.onclick = () => {
+                if (typeof window._selectLayoutNode === 'function') window._selectLayoutNode(grpSel);
+                renderScreen(jsonPath);
+                menu.remove();
+            };
+            menu.appendChild(mgBtn);
+            quickCount++;
+        }
+        if (quickCount > 0) {
+            const hrTop = document.createElement('hr');
+            hrTop.style.margin = '4px 0';
+            menu.appendChild(hrTop);
+        }
         
         ['left', 'center', 'right'].forEach(align => {
             const btn = document.createElement('button');
@@ -4912,7 +4707,7 @@ export async function renderScreen(jsonPath) {
     // Render all widgets using LVGL-style layout
     // Only menu_row widgets are focusable, in JSON order (provisioning: rows shown but focus is on Connect/Back only).
     const menuRowsAll = (data.widgets || []).filter(w => w.type === 'menu_row').sort((a, b) => (a.lcdRow || 1) - (b.lcdRow || 1));
-    const menuRows = data.page === 'PROVISIONING_SETUP' ? [] : menuRowsAll;
+    const menuRows = data.page === PAGE.PROVISIONING ? [] : menuRowsAll;
     console.log('Menu row order (by lcdRow):', menuRowsAll.map(r => `${r.label} (row ${r.lcdRow})`));
     // Focus is index in sorted menuRows array
     let menuRowsFocusedIndex = typeof window._currentScreenFocus === 'number' ? window._currentScreenFocus : 0;
@@ -4929,7 +4724,7 @@ export async function renderScreen(jsonPath) {
             wifiRowEditMode: !!window._wifiRowEditMode,
             valueEditMode: !!window._valueEditMode
         };
-    } else if (data.page === 'PROVISIONING_SETUP') {
+    } else if (data.page === PAGE.PROVISIONING) {
         if (typeof window._provisioningButtonFocus !== 'number') window._provisioningButtonFocus = 0;
         const stateMap = getScreenStateMap();
         const existing = stateMap[jsonPath] || {};
@@ -4939,11 +4734,7 @@ export async function renderScreen(jsonPath) {
         };
     }
     const focusedMenuRowId = menuRows[menuRowsFocusedIndex]?.id || null;
-    let menuRowCounter = 0;
-    const menuRowGap = data.layout?.menuRowGap || 0;
     const menuRowPixelHeight = Math.max(8, Number(data.layout?.menuRowPixelHeight) || TSTAT10_MENU_ROW_PX_DEFAULT);
-    const headerY = 0; // Top row
-    const menuRowsTop = headerY + menuRowPixelHeight;
     data.widgets.forEach((widget, idx) => {
             const lcdRow = widget.lcdRow || 1;
             const yPos = (lcdRow - 1) * menuRowPixelHeight;
@@ -4979,7 +4770,10 @@ export async function renderScreen(jsonPath) {
                 enableInlineTextEdit(header, () => widget.text || '', (txt) => { widget.text = txt; renderScreen(jsonPath); });
                 header.addEventListener('contextmenu', (e) => {
                     selectLayoutNode(`w-${idx}`);
-                    showAlignmentMenu(e, widget, 'align');
+                    showAlignmentMenu(e, widget, 'align', {
+                        editTreeNodeId: `w-${idx}`,
+                        moveGroupBaseTreeNodeId: `w-${idx}`
+                    });
                 });
             }
             lcd.appendChild(header);
@@ -5006,7 +4800,7 @@ export async function renderScreen(jsonPath) {
             label.style.position = 'absolute';
             const xPos = widget.x || 0;
             let yPos = widget.y || 0;
-            if (data.page === 'MAIN_DISPLAY' && widget.id === 'main_icons_group') {
+            if (data.page === PAGE.MAIN && widget.id === 'main_icons_group') {
                 // Keep icon strip inside LCD bounds in all modes.
                 const iconRowHeight = 64;
                 const maxY = Math.max(0, canvasHeightPx - iconRowHeight);
@@ -5030,7 +4824,7 @@ export async function renderScreen(jsonPath) {
             label.style.whiteSpace = widget.wrap ? 'normal' : 'nowrap';
             if (widget.id === 'main_icons_group') {
                 label.innerHTML = renderMainIconsGroupText(widget);
-            } else if (widget.id === 'prov_rssi_icon' && data.page === 'PROVISIONING_SETUP') {
+            } else if (widget.id === 'prov_rssi_icon' && data.page === PAGE.PROVISIONING) {
                 const st = data.widgets?.find((w) => w && w.id === 'ui_item_prov_status');
                 const { icon } = getProvisioningRssiPresentation(st?.value);
                 label.innerHTML =
@@ -5155,6 +4949,13 @@ export async function renderScreen(jsonPath) {
                         widget.text = String(txt || '');
                         renderScreen(jsonPath);
                     });
+                    label.addEventListener('contextmenu', (e) => {
+                        selectLayoutNode(`w-${idx}`);
+                        showAlignmentMenu(e, widget, 'align', {
+                            editTreeNodeId: `w-${idx}`,
+                            moveGroupBaseTreeNodeId: `w-${idx}`
+                        });
+                    });
                 }
             }
             lcd.appendChild(label);
@@ -5216,7 +5017,8 @@ export async function renderScreen(jsonPath) {
                             lcd.appendChild(guide);
                         }
                         const yLocal = lcdClientYToLocalY(mv.clientY, lcd);
-                        const targetRow = Math.max(1, Math.min(maxSlots, Math.floor(yLocal / h) + 1));
+                        const targetRow = Math.max(1, Math.min(maxSlots, Math.floor(yLocal / h + 0.5) + 1));
+                        // Horizontal line on the boundary below slot (targetRow-1) and above slot targetRow.
                         guide.style.top = `${(targetRow - 1) * h - 1}px`;
                     };
                     const onUp = (up) => {
@@ -5244,7 +5046,7 @@ export async function renderScreen(jsonPath) {
                                 const valueSpan = document.createElement('span');
                                 valueSpan.classList.add('tstat-value-box');
                                 if (widget.valueId) valueSpan.id = widget.valueId;
-                                const isMainHome = data.page === 'MAIN_DISPLAY';
+                                const isMainHome = data.page === PAGE.MAIN;
                                 const boundValue = liveWidget.t3ValueBinding ? getT3000PointValue(liveWidget.t3ValueBinding) : null;
                                 let rawVal;
                                 const storedVal = (liveWidget.value ?? '').toString();
@@ -5252,10 +5054,10 @@ export async function renderScreen(jsonPath) {
                                     window._isVisualEditMode && storedVal.trim().length > 0;
                                 if (useStoredInLayoutEdit) {
                                     rawVal = storedVal;
-                                } else if (data.page === 'PROVISIONING_SETUP' && widget.id === 'ui_item_prov_rssi') {
+                                } else if (data.page === PAGE.PROVISIONING && widget.id === 'ui_item_prov_rssi') {
                                     const st = (window._currentScreenData?.widgets || []).find((w) => w && w.id === 'ui_item_prov_status');
                                     rawVal = getProvisioningRssiPresentation(st?.value).text;
-                                } else if (data.page === 'PROVISIONING_SETUP' && widget.id === 'ui_item_prov_rssi_quality') {
+                                } else if (data.page === PAGE.PROVISIONING && widget.id === 'ui_item_prov_rssi_quality') {
                                     const st = (window._currentScreenData?.widgets || []).find((w) => w && w.id === 'ui_item_prov_status');
                                     rawVal = getProvisioningRssiPresentation(st?.value).quality;
                                 } else {
@@ -5263,7 +5065,7 @@ export async function renderScreen(jsonPath) {
                                 }
                                 const ipv4RowIds = ['ui_item_ip', 'ui_item_mask', 'ui_item_gw'];
                                 const activeOctetIndex = (
-                                    data.page === 'WIFI_SETTINGS' &&
+                                    data.page === PAGE.WIFI &&
                                     isIpv4RowId(widget.id) &&
                                     window._ipEditMode &&
                                     widget.id === focusedMenuRowId
@@ -5305,9 +5107,9 @@ export async function renderScreen(jsonPath) {
                                 valueSpan.style.whiteSpace = 'nowrap';
                                 valueSpan.style.overflow = 'hidden';
                                 valueSpan.style.textOverflow = 'ellipsis';
-                                const isSettingsPage = data.page !== 'MAIN_DISPLAY' && data.page !== 'SETUP_MENU';
+                                const isSettingsPage = data.page !== PAGE.MAIN && data.page !== PAGE.SETUP;
                                 const editActive = isSettingsPage && widget.id === focusedMenuRowId &&
-                                    (data.page === 'WIFI_SETTINGS' ? !!window._wifiRowEditMode : !!window._valueEditMode);
+                                    (data.page === PAGE.WIFI ? !!window._wifiRowEditMode : !!window._valueEditMode);
                                 if (editActive) valueSpan.classList.add('tstat-edit-active');
                 // Render highlight background for every row, only visible for focused row
                 const highlight = document.createElement('div');
@@ -5331,7 +5133,7 @@ export async function renderScreen(jsonPath) {
                 highlight.style.pointerEvents = 'none';
                 // Focus logic: highlight only if this menu_row is the focused one (by id)
                 const focusedMenuRow = menuRows[menuRowsFocusedIndex];
-                if (data.page === 'MAIN_DISPLAY') {
+                if (data.page === PAGE.MAIN) {
                     highlight.style.background = 'rgba(255,255,255,0.22)';
                     highlight.style.opacity = (widget.id === focusedMenuRow?.id) ? '1' : '0';
                 } else {
@@ -5503,7 +5305,7 @@ export async function renderScreen(jsonPath) {
                 }, 0);
                 row.style.height = menuRowPixelHeight + 'px';
                 // Default background for non-focused rows
-                if (data.page === 'MAIN_DISPLAY') {
+                if (data.page === PAGE.MAIN) {
                     row.style.background = 'transparent';
                     row.style.boxShadow = '';
                 } else if (!focusedMenuRow || widget.id !== focusedMenuRow.id) {
@@ -5535,7 +5337,7 @@ export async function renderScreen(jsonPath) {
                         selectLayoutNode(`w-${idx}-label`);
                     });
                 }
-                const needsLeadingSpacer = data.page !== 'MAIN_DISPLAY' && data.page !== 'WIFI_SETTINGS';
+                const needsLeadingSpacer = data.page !== PAGE.MAIN && data.page !== PAGE.WIFI;
                 const renderedLabel = resolveMenuRowLabel(widget);
                 labelSpanFixed.textContent = (needsLeadingSpacer ? '\u00A0' : '') + renderedLabel;
                 // Removed left padding, use non-breaking space for shift
@@ -5545,7 +5347,7 @@ export async function renderScreen(jsonPath) {
                 labelSpanFixed.style.fontWeight = 'bold';
                 labelSpanFixed.style.color = '#fff';
                 labelSpanFixed.style.padding = '0';
-                if (data.page === 'WIFI_SETTINGS') {
+                if (data.page === PAGE.WIFI) {
                     const lpad = data.layout?.labelBoxLeftPadding ?? 0;
                     const rpad = data.layout?.labelBoxRightPadding ?? 0;
                     labelSpanFixed.style.paddingLeft = lpad + 'px';
@@ -5622,7 +5424,7 @@ export async function renderScreen(jsonPath) {
                 valueSpan.style.whiteSpace = 'nowrap';
                 valueSpan.style.overflow = 'hidden';
                 valueSpan.style.textOverflow = 'ellipsis';
-                if (data.page === 'MAIN_DISPLAY') {
+                if (data.page === PAGE.MAIN) {
                     valueSpan.style.padding = '4px 10px';
                     valueSpan.style.boxSizing = 'border-box';
                 }
@@ -5644,7 +5446,10 @@ export async function renderScreen(jsonPath) {
                     valueSpan.style.cursor = 'grab';
                     valueSpan.addEventListener('contextmenu', (e) => {
                         selectLayoutNode(`w-${idx}-value`);
-                        showAlignmentMenu(e, widget, 'valueAlign');
+                        showAlignmentMenu(e, widget, 'valueAlign', {
+                            editTreeNodeId: canEditMenuValueText ? `w-${idx}-value` : null,
+                            moveGroupBaseTreeNodeId: `w-${idx}-value`
+                        });
                     });
                     // Fast resize using mouse wheel
                     valueSpan.addEventListener('wheel', (e) => {
@@ -5769,15 +5574,15 @@ export async function renderScreen(jsonPath) {
             if (widget.id === 'btn_back') {
                 btn.style.cursor = 'pointer';
                 btn.addEventListener('click', () => {
-                    if (data.page === 'SETUP_MENU') {
-                        window.navigateTo('main');
-                    } else if (data.page !== 'MAIN_DISPLAY') {
-                        window.navigateTo('setup'); // All submenus go back to the setup menu
+                    if (data.page === PAGE.SETUP) {
+                        window.navigateTo(ROUTE_KEY.MAIN);
+                    } else if (data.page !== PAGE.MAIN) {
+                        window.navigateTo(ROUTE_KEY.SETUP); // All submenus go back to the setup menu
                     }
                 });
             } else if (widget.id === 'btn_settings') {
                 btn.style.cursor = 'pointer';
-                btn.addEventListener('click', () => window.navigateTo('setup'));
+                btn.addEventListener('click', () => window.navigateTo(ROUTE_KEY.SETUP));
             } else if (widget.id === 'btn_next') {
                 btn.style.cursor = 'pointer';
                 btn.addEventListener('click', () => {
@@ -5785,11 +5590,11 @@ export async function renderScreen(jsonPath) {
                     if (!menuRows.length) return;
                     let focusIdx = typeof window._currentScreenFocus === 'number' ? window._currentScreenFocus : 0;
                     focusIdx = ((focusIdx % menuRows.length) + menuRows.length) % menuRows.length;
-                    if (data.page === 'SETUP_MENU') {
+                    if (data.page === PAGE.SETUP) {
                         openSetupFocusedRow(menuRows, focusIdx);
                         return;
                     }
-                    if (data.page === 'WIFI_SETTINGS') {
+                    if (data.page === PAGE.WIFI) {
                         const focusedRow = menuRows[focusIdx];
                         if (focusedRow) {
                             if (!window._wifiRowEditMode) {
@@ -5804,7 +5609,7 @@ export async function renderScreen(jsonPath) {
                         }
                         return;
                     }
-                    if (data.page === 'MAIN_DISPLAY') {
+                    if (data.page === PAGE.MAIN) {
                         // Home screen NEXT behavior: cycle focused parameter row.
                         focusIdx = (focusIdx + 1) % menuRows.length;
                         window._currentScreenFocus = focusIdx;
@@ -5819,7 +5624,7 @@ export async function renderScreen(jsonPath) {
             } else if (widget.id === 'btn_connect_phone') {
                 btn.style.cursor = 'pointer';
                 btn.addEventListener('click', () => {
-                    if (data.page !== 'PROVISIONING_SETUP') return;
+                    if (data.page !== PAGE.PROVISIONING) return;
                     window._provisioningButtonFocus = 0;
                     const sm = getScreenStateMap();
                     sm[jsonPath] = { ...sm[jsonPath], provisioningButtonFocus: 0 };
@@ -5849,6 +5654,8 @@ export async function renderScreen(jsonPath) {
 
             btn.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
+                e.stopPropagation();
+                if (widgetIdx >= 0) selectLayoutNode(`w-${widgetIdx}`);
                 let existingMenu = document.getElementById('visual-edit-context-menu');
                 if (existingMenu) existingMenu.remove();
                 
@@ -5865,6 +5672,41 @@ export async function renderScreen(jsonPath) {
                 menu.style.display = 'flex';
                 menu.style.flexDirection = 'column';
                 menu.style.padding = '5px';
+                const btnTreeId = widgetIdx >= 0 ? `w-${widgetIdx}` : null;
+                if (btnTreeId && lcdElementHasInlineEditHost(btnTreeId)) {
+                    const edBtn = document.createElement('button');
+                    edBtn.type = 'button';
+                    edBtn.textContent = 'Edit text here';
+                    edBtn.style.margin = '2px';
+                    edBtn.style.cursor = 'pointer';
+                    edBtn.onclick = () => {
+                        tryInvokeInlineEditForTreeNodeId(btnTreeId);
+                        menu.remove();
+                    };
+                    menu.appendChild(edBtn);
+                }
+                const grpSel =
+                    btnTreeId && window._currentScreenData ?
+                        resolveParentGroupSelectionTreeNodeId(window._currentScreenData, btnTreeId)
+                    :   null;
+                if (grpSel) {
+                    const mgBtn = document.createElement('button');
+                    mgBtn.type = 'button';
+                    mgBtn.textContent = 'Select parent group to move';
+                    mgBtn.style.margin = '2px';
+                    mgBtn.style.cursor = 'pointer';
+                    mgBtn.onclick = () => {
+                        if (typeof window._selectLayoutNode === 'function') window._selectLayoutNode(grpSel);
+                        renderScreen(jsonPath);
+                        menu.remove();
+                    };
+                    menu.appendChild(mgBtn);
+                }
+                if ((btnTreeId && lcdElementHasInlineEditHost(btnTreeId)) || grpSel) {
+                    const hrQ = document.createElement('hr');
+                    hrQ.style.margin = '4px 0';
+                    menu.appendChild(hrQ);
+                }
                 const charW = canvasLogicalWidthPx(data) / (data.layout?.lcdTextColumns || 16);
                 
                 const nudgeLeft = document.createElement('button');
@@ -5883,7 +5725,7 @@ export async function renderScreen(jsonPath) {
                 setTimeout(() => { const closeMenu = (evt) => { if (!menu.contains(evt.target)) { menu.remove(); document.removeEventListener('click', closeMenu); } }; document.addEventListener('click', closeMenu); }, 0);
             });
         }
-        if (data.page === 'PROVISIONING_SETUP' && (widget.id === 'btn_connect_phone' || widget.id === 'btn_back')) {
+        if (data.page === PAGE.PROVISIONING && (widget.id === 'btn_connect_phone' || widget.id === 'btn_back')) {
             const bf = typeof window._provisioningButtonFocus === 'number' ? window._provisioningButtonFocus : 0;
             const isConnect = widget.id === 'btn_connect_phone';
             const focused = (isConnect && bf === 0) || (!isConnect && bf === 1);
@@ -5901,7 +5743,7 @@ export async function renderScreen(jsonPath) {
     });
 
     // WiFi settings: show full focused value on the row immediately above the footer buttons
-    if (data.page === 'WIFI_SETTINGS') {
+    if (data.page === PAGE.WIFI) {
         const menuRowsList = (data.widgets || []).filter(w => w.type === 'menu_row').sort((a, b) => (a.lcdRow || 1) - (b.lcdRow || 1));
         const focusIdx = typeof window._currentScreenFocus === 'number' ? window._currentScreenFocus : 0;
         const focused = menuRowsList[Math.min(Math.max(0, focusIdx), Math.max(0, menuRowsList.length - 1))];
@@ -5968,7 +5810,7 @@ export async function renderScreen(jsonPath) {
 }
 
 /**
- * Home screen (MAIN_DISPLAY): SET = setpoint step; FAN/SYS = MSV-style option lists (var2/var3).
+ * Home screen (`PAGE.MAIN` / main thermostat JSON): SET = setpoint step; FAN/SYS = MSV-style option lists (var2/var3).
  * Setpoint uses step/min/max on main_row_set; fan order matches MODBUS 0–4: OFF, LOW, MED, HIGH, AUTO.
  */
 function adjustMainHomeRowValue(origRow, e) {
@@ -6020,7 +5862,7 @@ function getMenuRows(data) {
     const rows = (data.widgets || [])
         .filter(w => w.type === 'menu_row')
         .sort((a, b) => (a.lcdRow || 1) - (b.lcdRow || 1));
-    if (data.page === 'PROVISIONING_SETUP') return [];
+    if (data.page === PAGE.PROVISIONING) return [];
     return rows;
 }
 
@@ -6039,7 +5881,7 @@ function getScreenFocusProfile(data, menuRows) {
     const page = data.page;
     const focusMap = buildLinearFocusMap(menuRows);
     // SquareLine-style profile: navigation graph + directional intent per mode/screen.
-    if (page === 'SETUP_MENU') {
+    if (page === PAGE.SETUP) {
         return {
             focusMap,
             upDownMovesFocus: true,
@@ -6047,7 +5889,7 @@ function getScreenFocusProfile(data, menuRows) {
             leftBehavior: 'navigate-main'
         };
     }
-    if (page === 'MAIN_DISPLAY') {
+    if (page === PAGE.MAIN) {
         return {
             focusMap,
             upDownMovesFocus: false,
@@ -6055,7 +5897,7 @@ function getScreenFocusProfile(data, menuRows) {
             leftBehavior: 'navigate-setup'
         };
     }
-    if (page === 'WIFI_SETTINGS') {
+    if (page === PAGE.WIFI) {
         return {
             focusMap,
             upDownMovesFocus: !window._wifiRowEditMode,
@@ -6080,18 +5922,14 @@ function moveFocusByDirection(focusProfile, focusedIndex, direction) {
 function openSetupFocusedRow(menuRows, focusedIndex) {
     const focusedRow = menuRows[focusedIndex];
     if (!focusedRow) return;
-    if (focusedRow.id === 'ui_item_rs485') window.navigateTo('settings');
-    else if (focusedRow.id === 'ui_item_ethernet') window.navigateTo('ethernet');
-    else if (focusedRow.id === 'ui_item_provisioning') window.navigateTo('provisioning');
-    else if (focusedRow.id === 'ui_item_clock') window.navigateTo('clock');
-    else if (focusedRow.id === 'ui_item_oat') window.navigateTo('oat');
-    else if (focusedRow.id === 'ui_item_tbd') window.navigateTo('tbd');
+    const rk = SETUP_MENU_ROW_TO_ROUTE[focusedRow.id];
+    if (rk) window.navigateTo(rk);
 }
 
 function advanceFocusByRight(data, menuRows, focusedIndex) {
     if (!menuRows.length) return focusedIndex;
     const focusedRow = menuRows[focusedIndex];
-    if (data.page === 'WIFI_SETTINGS' && focusedRow) {
+    if (data.page === PAGE.WIFI && focusedRow) {
         if (!window._wifiRowEditMode) {
             window._wifiRowEditMode = true;
             window._ipEditMode = isIpv4RowId(focusedRow.id);
@@ -6101,7 +5939,7 @@ function advanceFocusByRight(data, menuRows, focusedIndex) {
         }
     }
     // WIFI IPv4 edit mode: Right starts octet edit; then advances octet.
-    if (data.page === 'WIFI_SETTINGS' && focusedRow && isIpv4RowId(focusedRow.id)) {
+    if (data.page === PAGE.WIFI && focusedRow && isIpv4RowId(focusedRow.id)) {
         if (!window._ipEditMode) {
             window._ipEditMode = true;
             window._valueEditMode = true;
@@ -6112,7 +5950,7 @@ function advanceFocusByRight(data, menuRows, focusedIndex) {
         window._ipEditOctetIndex = (currentOctet + 1) % 4;
         return focusedIndex;
     }
-    if (data.page === 'WIFI_SETTINGS') {
+    if (data.page === PAGE.WIFI) {
         return focusedIndex;
     }
     window._ipEditMode = false;
@@ -6170,7 +6008,7 @@ function handleArrowKey(e) {
     }
     if (!data) return;
 
-    if (data.page === 'PROVISIONING_SETUP') {
+    if (data.page === PAGE.PROVISIONING) {
         if (handleProvisioningArrowKey(e)) return;
     }
 
@@ -6184,7 +6022,7 @@ function handleArrowKey(e) {
     window._currentScreenFocus = focusedIndex;
     const focusProfile = getScreenFocusProfile(data, menuRows);
 
-    if (data.page === 'SETUP_MENU') {
+    if (data.page === PAGE.SETUP) {
         // Setup Menu logic: Up/Down moves focus, Right selects, Left goes back
         if (e.key === 'ArrowUp') {
             focusedIndex = moveFocusByDirection(focusProfile, focusedIndex, 'up');
@@ -6207,12 +6045,12 @@ function handleArrowKey(e) {
         } else if (e.key === 'ArrowLeft') {
             window._ipEditMode = false;
             window._valueEditMode = false;
-            window.navigateTo('main');
+            window.navigateTo(ROUTE_KEY.MAIN);
             return;
         }
     } else {
-        // Home (MAIN_DISPLAY): Right cycles focus SET → FAN → SYS; Left opens setup menu; Up/Down reserved
-        if (data.page === 'MAIN_DISPLAY') {
+        // Home (`PAGE.MAIN`): Right cycles focus SET → FAN → SYS; Left opens setup menu; Up/Down reserved
+        if (data.page === PAGE.MAIN) {
             if (e.key === 'ArrowRight') {
                 focusedIndex = moveFocusByDirection(focusProfile, focusedIndex, 'down');
                 window._currentScreenFocus = focusedIndex;
@@ -6235,7 +6073,7 @@ function handleArrowKey(e) {
         // Right arrow (NEXT) moves focus to the NEXT item (+1, visually DOWN the list)
         // Left arrow (BACK) exits the current screen and returns to the Setup Menu
         if (e.key === 'ArrowRight') {
-            if (data.page === 'WIFI_SETTINGS') {
+            if (data.page === PAGE.WIFI) {
                 const focusedRow = menuRows[focusedIndex];
                 if (focusedRow) {
                     if (!window._wifiRowEditMode) {
@@ -6256,25 +6094,25 @@ function handleArrowKey(e) {
             renderScreen(window._currentJsonPath);
             return;
         } else if (e.key === 'ArrowLeft') {
-            if (data.page === 'WIFI_SETTINGS' && window._wifiRowEditMode) {
+            if (data.page === PAGE.WIFI && window._wifiRowEditMode) {
                 window._wifiRowEditMode = false;
                 window._ipEditMode = false;
                 window._valueEditMode = false;
                 renderScreen(window._currentJsonPath);
                 return;
             }
-            if (data.page !== 'WIFI_SETTINGS' && window._valueEditMode) {
+            if (data.page !== PAGE.WIFI && window._valueEditMode) {
                 window._valueEditMode = false;
                 renderScreen(window._currentJsonPath);
                 return;
             }
             window._ipEditMode = false;
             window._valueEditMode = false;
-            window.navigateTo('setup');
+            window.navigateTo(ROUTE_KEY.SETUP);
             return;
         }
         if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-            if (data.page === 'WIFI_SETTINGS' && !window._wifiRowEditMode) {
+            if (data.page === PAGE.WIFI && !window._wifiRowEditMode) {
                 if (e.key === 'ArrowUp') {
                     focusedIndex = moveFocusByDirection(focusProfile, focusedIndex, 'up');
                 } else {
@@ -6287,7 +6125,7 @@ function handleArrowKey(e) {
                 renderScreen(window._currentJsonPath);
                 return;
             }
-            if (data.page !== 'WIFI_SETTINGS') {
+            if (data.page !== PAGE.WIFI) {
                 window._valueEditMode = true;
             } else if (window._wifiRowEditMode) {
                 window._valueEditMode = true;

@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
+import { mainDisplayLocalStorageCacheKey } from './registry-helper.mjs';
 
-const CACHE_KEY = 'tstat_cache_./main_display.json';
+const CACHE_KEY = mainDisplayLocalStorageCacheKey();
 
 test.describe('Screen background persistence', () => {
     test('set dark background, save exit edit, reload — cache keeps #000000', async ({ page }) => {

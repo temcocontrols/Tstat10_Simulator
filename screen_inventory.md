@@ -1,27 +1,33 @@
 # Tstat10 Screen Inventory
 
-This document defines the current screen names used in the simulator so we use one shared vocabulary in discussions, tickets, and commits.
+**Machine source of truth:** [`screens-registry.json`](screens-registry.json) — ordered list of `routeKey`, `page` (JSON id), `displayName`, and `jsonPath`. [`screen-paths.js`](screen-paths.js) imports the registry from [`screens-registry.embedded.mjs`](screens-registry.embedded.mjs) (generated from the JSON by `npm run build:schema-validator`) and builds `ROUTE_TO_JSON_PATH`, `ROUTE_KEY`, `PAGE`, `SETUP_MENU_ROW_TO_ROUTE`, `PROJECT_SCREEN_JSON_PATHS`, `SCREENS_BY_PAGE`, and related exports.
+
+**Widget `type` allowlist** for screen JSON lives in [`schemas/widget-types.json`](schemas/widget-types.json); it is merged into the JSON Schema at the same codegen step.
+
+This document is the human-oriented summary so we use one shared vocabulary in discussions, tickets, and commits.
 
 ## Naming Convention
 
-- Use **Display Name** for product/demo discussions.
-- Use **Screen Key** for navigation and code (`navigateTo('<key>')`).
+- Use **Display Name** for product/demo discussions (same string as `displayName` in the registry when possible).
+- Use **Screen Key** for navigation and code (`navigateTo('<key>')`) — same as **`routeKey`** in the registry.
 - Use **Page ID** for JSON-level references (`"page": "..."`).
 
 **Canvas size in the simulator:** On every screen load / render, **`enforceSimulatorFixedLcdCanvas`** (see [`AGENTS.md`](AGENTS.md) item **20**) forces the **same** logical framebuffer for **every** route: **240×320** portrait, **`lcdPresetId`: `tstat10_fw_240`**, with **`layout.lcdCanvas`** / **`layout.canvas`** kept in sync. The hosted sim does **not** change LCD pixel size or orientation when you navigate between pages. Inspector **LCD & driver** / **orientation** still edit JSON in memory (and **Apply layout** still rescales widget geometry per item **14** when you change canvas authoring size), but the **live** `#tstat-lcd-container` slot stays production-sized until that rule changes. **Workbench nudge** (LCD translate in the shell) is **global** across pages (`tstat10_lcd_bezel_nudge_px` in `ui-bridge.js`; same item **20**). **Color theme** (Inspector → Screen) batch-updates **background + row highlight** across cached project screens (see [`AGENTS.md`](AGENTS.md) item **19**).
 
 ## Active Screens
 
+See **`screens-registry.json`** → `screens` for the canonical rows. Summary:
+
 | Display Name | Screen Key | Page ID | Source JSON | Notes |
 |---|---|---|---|---|
 | Home | `main` | `MAIN_DISPLAY` | `main_display.json` | Main thermostat display with SET/FAN/SYS rows |
-| Setup Menu | `setup` | `SETUP_MENU` | `setup_menu.json` | Entry hub for setup sub-pages |
-| RS485 Settings | `settings` | `RS485_SETTINGS` | `network_settings.json` | Protocol/NetID/Baud setup |
-| WiFi Setup | `ethernet` | `WIFI_SETTINGS` | `ethernet_setup.json` | IP/Mask/Gateway/DHCP setup |
+| Setup menu | `setup` | `SETUP_MENU` | `setup_menu.json` | Entry hub for setup sub-pages |
+| RS485 settings | `settings` | `RS485_SETTINGS` | `network_settings.json` | Protocol/NetID/Baud setup |
+| Wi-Fi setup | `ethernet` | `WIFI_SETTINGS` | `ethernet_setup.json` | IP/Mask/Gateway/DHCP setup |
 | Provisioning | `provisioning` | `PROVISIONING_SETUP` | `provisioning_setup.json` | Phone-link/manual credential onboarding flow |
-| Clock Setup | `clock` | `CLOCK_SETTINGS` | `clock_setup.json` | Date/time setup |
-| Outside Air Temp | `oat` | `OAT_SETTINGS` | `oat_setup.json` | OAT value and offset |
-| To Be Done | `tbd` | `TBD_SETTINGS` | `tbd_setup.json` | Placeholder page for future features |
+| Clock setup | `clock` | `CLOCK_SETTINGS` | `clock_setup.json` | Date/time setup |
+| Outside air temp | `oat` | `OAT_SETTINGS` | `oat_setup.json` | OAT value and offset |
+| To be done | `tbd` | `TBD_SETTINGS` | `tbd_setup.json` | Placeholder page for future features |
 
 ## Current Navigation Flow
 

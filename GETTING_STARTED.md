@@ -28,7 +28,7 @@ Open the URL shown in the terminal (usually **http://127.0.0.1:8787/Tstat10.html
 
 **Phone or tablet:** use **`http://<your-PC-LAN-IP>:8787/Tstat10.html`** on the same Wi‑Fi (example: `http://10.12.227.234:8787/Tstat10.html`). **Do not use `127.0.0.1` on the phone** — that address means “this device,” so the browser shows **connection error ~-102**. The dev server listens on all interfaces by default (`HOST=0.0.0.0`); set **`HOST=127.0.0.1`** only if you want local-only binding.
 
-**Why not “Open HTML in browser” or Live Server?** This project uses **ES modules** and optional **console logging** to disk. The built-in dev server (`npm start`) is the supported way—see **`agents.md`** §13.
+**Why not “Open HTML in browser” or Live Server?** This project uses **ES modules** and optional **console logging** to disk. The built-in dev server (`npm start`) is the supported way—see **`agents.md`** §13. For log file formats, pathname/session fields, and **`jq`** examples, see **[`docs/console-pipe.md`](docs/console-pipe.md)**.
 
 ## 3. What happens automatically
 

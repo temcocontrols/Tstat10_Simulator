@@ -209,7 +209,8 @@ const server = http.createServer((req, res) => {
         });
         req.on('end', () => {
             try {
-                const line = appendBrowserLogFromBody(body);
+                const ua = req.headers['user-agent'];
+                const line = appendBrowserLogFromBody(body, { userAgent: typeof ua === 'string' ? ua : '' });
                 process.stdout.write(line + '\n');
                 res.writeHead(204);
                 res.end();

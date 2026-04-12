@@ -25,11 +25,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: ESLint
-        run: npm run lint
+      - name: ESLint (zero warnings — same as pre-commit)
+        run: npm run lint:ci
 
       - name: Doctor (env sanity)
         run: npm run doctor
+
+      - name: Screen JSON schema (regenerate + drift check + validate fixtures)
+        run: npm run validate:screens:ci
 
       - name: Syntax check (key modules)
         run: |
@@ -38,6 +41,7 @@ jobs:
           node --check lcd-platform-presets.js
           node --check menu-ui.js
           node --check screen-paths.js
+          node --check assets-strip-screen-registry.mjs
           node --check save-server.mjs
 
       - name: Install Playwright Chromium

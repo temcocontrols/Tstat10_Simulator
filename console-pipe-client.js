@@ -8,6 +8,9 @@
  *
  * Disable: ?consolePipe=0  or  localStorage.setItem('TSTAT_CONSOLE_PIPE','0')
  * Force on without probe (rare): ?consolePipe=1  or  localStorage.setItem('TSTAT_CONSOLE_PIPE','1')
+ *
+ * Each POST body includes level, text, timestamp, pathname, document title, and a per-tab session id (`sid`);
+ * the server appends **`logs/browser-console.log`** (human) and **`logs/browser-console.jsonl`** (NDJSON). See **`docs/console-pipe.md`**.
  */
 (function () {
     try {
@@ -87,10 +90,39 @@
                 });
             }
 
+            function logSessionId() {
+                try {
+                    var k = 'TSTAT_LOG_SID';
+                    var s = window.sessionStorage.getItem(k);
+                    if (!s) {
+                        s = 's' + Math.random().toString(36).slice(2, 12);
+                        window.sessionStorage.setItem(k, s);
+                    }
+                    return s;
+                } catch {
+                    return '';
+                }
+            }
+
             function send(level, args) {
                 if (pipeState === 'dead') return;
                 var text = Array.prototype.map.call(args, serialize).join(' ');
-                var body = JSON.stringify({ level: level, text: text, t: Date.now() });
+                var pathname = '';
+                var title = '';
+                try {
+                    pathname = window.location.pathname || '';
+                } catch {}
+                try {
+                    title = document.title || '';
+                } catch {}
+                var body = JSON.stringify({
+                    level: level,
+                    text: text,
+                    t: Date.now(),
+                    pathname: pathname,
+                    title: title,
+                    sid: logSessionId()
+                });
                 if (typeof fetch !== 'function') return;
 
                 if (pipeState === 'unknown') {

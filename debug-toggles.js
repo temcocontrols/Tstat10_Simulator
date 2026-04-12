@@ -14,7 +14,7 @@ export function setupDebugToggles(renderCallback) {
                 } else {
                     document.body.classList.remove('debug-active');
                 }
-                gridToggle.addEventListener('change', (e) => {
+                gridToggle.addEventListener('change', () => {
                     if (window._tstatSuppressGridToggleRender) return;
                     window._tstatShowGridLayer = gridToggle.checked;
                     if (gridToggle.checked) {
@@ -27,7 +27,7 @@ export function setupDebugToggles(renderCallback) {
             }
             if (coordsToggle) {
                 coordsToggle.checked = !!window._tstatShowCoordsLayer;
-                coordsToggle.addEventListener('change', (e) => {
+                coordsToggle.addEventListener('change', () => {
                     window._tstatShowCoordsLayer = coordsToggle.checked;
                     renderCallback();
                 });
