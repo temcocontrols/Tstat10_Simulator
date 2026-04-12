@@ -1,5 +1,7 @@
 // menu-ui.js: Handles rendering of menu header, rows, arrows for LCD simulator
 
+import { TSTAT10_FW_HIGHLIGHT_CSS } from './tstat10-firmware-display.js';
+
 // Render the menu header
 export function renderMenuHeader(lcd, data) {
     const headerData = data.widgets[0];
@@ -34,7 +36,8 @@ export function renderMenuRows(lcd, data, menuRowsFocusedIndex) {
         row.style.margin = '6px 0 6px 0';
         row.style.padding = '6px 0';
         row.style.borderRadius = '8px';
-        row.style.background = (idx === menuRowsFocusedIndex) ? (data.styles?.highlight || '#008080') : 'rgba(0,0,0,0.08)';
+        row.style.background =
+            idx === menuRowsFocusedIndex ? data.styles?.highlight || TSTAT10_FW_HIGHLIGHT_CSS : 'rgba(0,0,0,0.08)';
         row.style.fontSize = baseFontSize + 'px';
         row.style.fontWeight = data.styles?.fontWeight || 'bold';
         row.style.fontFamily = data.styles?.fontFamily || 'monospace';
@@ -45,7 +48,7 @@ export function renderMenuRows(lcd, data, menuRowsFocusedIndex) {
         const labelSpan = document.createElement('span');
         let labelText = (widget.label + ' '.repeat(textWidth)).slice(0, textWidth);
         if (idx === menuRowsFocusedIndex) {
-            labelSpan.style.background = data.styles?.highlight || '#008080';
+            labelSpan.style.background = data.styles?.highlight || TSTAT10_FW_HIGHLIGHT_CSS;
             labelSpan.style.borderRadius = '8px';
         }
         labelSpan.textContent = labelText;

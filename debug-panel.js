@@ -29,7 +29,7 @@ export function updateDebugPanel(data) {
         //     headers: { 'Content-Type': 'application/json' },
         //     body: JSON.stringify(debugObj)
         // });
-    } catch (e) { /* ignore errors */ }
+    } catch { /* ignore errors */ }
     // Update status line if present
     const statusLine = document.getElementById('tstat-status-line');
     if (statusLine) {

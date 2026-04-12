@@ -1,0 +1,120 @@
+{
+  "page": "PROVISIONING_SETUP",
+  "styles": {
+    "bg": "#7bc2ce",
+    "highlight": "#39757b",
+    "fontFamily": "'Fira Mono', 'Consolas', 'Menlo', 'Monaco', 'Liberation Mono', 'Courier New', monospace",
+    "fontWeight": "900",
+    "fontSize": "22px"
+  },
+  "layout": {
+    "lcdCanvas": { "width": 240, "height": 320 },
+    "lcdTextRows": 10,
+    "lcdTextColumns": 16,
+    "labelColumnLayout": { "x": 14, "width": 104 },
+    "valueColumnLayout": { "x": 134, "width": 106 },
+    "menuRowPixelHeight": 32,
+    "headerLayout": { "x": 120, "y": 24, "align": "center", "font": "FONT_18_BOLD" },
+    "footerLayout": { "x": 0, "y": 272, "width": 240, "height": 48 },
+    "footerTopPadding": 4,
+    "footerBottomPadding": 8,
+    "buttonGap": 4,
+    "menuRowLeftPadding": 12,
+    "valueBoxRightPadding": 4,
+    "valueBoxLeftPadding": 4,
+    "valueBoxTextAlign": "right"
+  },
+  "widgets": [
+    { "type": "blank", "lcdRow": 1 },
+    {
+      "type": "header",
+      "text": "Wi‑Fi setup",
+      "x": 120,
+      "y": 24,
+      "align": "center",
+      "font": "FONT_18_BOLD",
+      "lcdRow": 2
+    },
+    {
+      "type": "label",
+      "id": "prov_rssi_icon",
+      "text": "",
+      "x": 228,
+      "y": 6,
+      "align": "right",
+      "width": 28,
+      "color": "#ffffff"
+    },
+    {
+      "type": "menu_row",
+      "id": "ui_item_prov_ap",
+      "label": "AP",
+      "value": "Tstat10-Setup",
+      "lcdRow": 3,
+      "labelWidth": 48,
+      "valueWidth": 168,
+      "notes": "SoftAP name"
+    },
+    {
+      "type": "menu_row",
+      "id": "ui_item_prov_pass",
+      "label": "Pass",
+      "value": "****",
+      "lcdRow": 4,
+      "labelWidth": 48,
+      "valueWidth": 168,
+      "notes": "Filled automatically after success"
+    },
+    {
+      "type": "menu_row",
+      "id": "ui_item_prov_status",
+      "label": "Status",
+      "options": ["Ready", "Connecting", "Requesting", "Success", "Failed", "WiFi connected"],
+      "value": "Ready",
+      "lcdRow": 5,
+      "labelWidth": 54,
+      "valueWidth": 162,
+      "notes": "Connect to Phone drives progress; credentials apply automatically"
+    },
+    {
+      "type": "menu_row",
+      "id": "ui_item_prov_rssi",
+      "label": "RSSI",
+      "value": "-68 dBm",
+      "lcdRow": 6,
+      "labelWidth": 48,
+      "valueWidth": 168,
+      "notes": "Simulated dBm; value box wide enough for “No signal” / dBm text"
+    },
+    {
+      "type": "menu_row",
+      "id": "ui_item_prov_rssi_quality",
+      "label": "Signal",
+      "value": "Good",
+      "lcdRow": 7,
+      "labelWidth": 48,
+      "valueWidth": 168,
+      "notes": "Qualitative: Weak … Excellent vs provisioning status"
+    },
+    {
+      "type": "button",
+      "id": "btn_connect_phone",
+      "label": "Connect to Phone",
+      "width": 210,
+      "height": 30,
+      "x": 15,
+      "y": 232,
+      "font": "14px 'Fira Mono', 'Consolas', monospace"
+    },
+    {
+      "type": "button",
+      "id": "btn_back",
+      "label": "Back",
+      "width": 210,
+      "height": 28,
+      "x": 15,
+      "y": 276,
+      "font": "13px 'Fira Mono', 'Consolas', monospace"
+    }
+  ]
+}

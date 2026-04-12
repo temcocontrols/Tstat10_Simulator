@@ -15,6 +15,7 @@ export function setupDebugToggles(renderCallback) {
                     document.body.classList.remove('debug-active');
                 }
                 gridToggle.addEventListener('change', (e) => {
+                    if (window._tstatSuppressGridToggleRender) return;
                     window._tstatShowGridLayer = gridToggle.checked;
                     if (gridToggle.checked) {
                         document.body.classList.add('debug-active');

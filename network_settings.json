@@ -1,29 +1,29 @@
 {
   "page": "RS485_SETTINGS",
   "styles": {
-    "bg": "#2c7cc4",
-    "highlight": "#008080",
+    "bg": "#7bc2ce",
+    "highlight": "#39757b",
     "fontFamily": "'Fira Mono', 'Consolas', 'Menlo', 'Monaco', 'Liberation Mono', 'Courier New', monospace",
     "fontWeight": "900",
-    "fontSize": "32px"
+    "fontSize": "26px"
   },
   "layout": {
-    "lcdCanvas": { "width": 320, "height": 480 },
+    "lcdCanvas": { "width": 240, "height": 320 },
     "lcdTextRows": 10,
     "lcdTextColumns": 16,
-    "labelColumnLayout": { "x": 20, "width": 120 },
-    "valueColumnLayout": { "x": 160, "width": 160 },
-    "menuRowPixelHeight": 48,
-    "headerLayout": { "x": 160, "y": 40, "align": "center", "font": "FONT_18_BOLD" },
-    "footerLayout": { "x": 0, "y": 435, "width": 320, "height": 48 },
-    "footerTopPadding": 6,
-    "footerBottomPadding": 10,
-    "buttonGap": 6,
-    "menuRowVerticalGap": 4,
-    "valueBoxRightPadding": 20,
-    "valueBoxLeftPadding": 12,
+    "labelColumnLayout": { "x": 14, "width": 90 },
+    "valueColumnLayout": { "x": 120, "width": 120 },
+    "menuRowPixelHeight": 32,
+    "headerLayout": { "x": 120, "y": 26, "align": "center", "font": "FONT_18_BOLD" },
+    "footerLayout": { "x": 0, "y": 272, "width": 240, "height": 48 },
+    "footerTopPadding": 4,
+    "footerBottomPadding": 8,
+    "buttonGap": 4,
+    "menuRowVerticalGap": 3,
+    "valueBoxRightPadding": 14,
+    "valueBoxLeftPadding": 8,
     "valueBoxTextAlign": "right",
-    "menuRowLeftPadding": 20
+    "menuRowLeftPadding": 14
   },
   "widgets": [
     {
@@ -33,8 +33,8 @@
     {
       "type": "header",
       "text": "RS485 Settings",
-      "x": 160,
-      "y": 40,
+      "x": 120,
+      "y": 26,
       "align": "center",
       "font": "FONT_18_BOLD",
       "lcdRow": 2
@@ -46,9 +46,9 @@
       "register": 8,
       "options": ["MODBUS", "BACNET"],
       "value": "MODBUS",
-      "labelWidth": 140,
-      "valueX": 160,
-      "valueWidth": 130,
+      "labelWidth": 104,
+      "valueX": 120,
+      "valueWidth": 98,
       "lcdRow": 3
     },
     {
@@ -58,9 +58,9 @@
       "register": 6,
       "is_focused": true,
       "value": 1,
-      "labelWidth": 140,
-      "valueX": 160,
-      "valueWidth": 130,
+      "labelWidth": 104,
+      "valueX": 120,
+      "valueWidth": 98,
       "lcdRow": 4
     },
     {
@@ -70,45 +70,54 @@
       "register": 7,
       "options": [9600, 19200, 38400, 115200],
       "value": 9600,
-      "labelWidth": 140,
-      "valueX": 160,
-      "valueWidth": 130,
+      "labelWidth": 104,
+      "valueX": 120,
+      "valueWidth": 98,
       "lcdRow": 5
+    },
+    {
+      "type": "box",
+      "id": "footer_buttons_group",
+      "treeName": "Footer buttons"
     },
     {
       "type": "button",
       "id": "btn_back",
+      "parentId": "footer_buttons_group",
       "label": "BACK",
-      "width": 92,
-      "height": 45,
-      "font": "32px 'Fira Mono', 'Consolas', 'Menlo', 'Monaco', 'Liberation Mono', 'Courier New', monospace",
+      "width": 68,
+      "height": 30,
+      "font": "24px 'Fira Mono', 'Consolas', 'Menlo', 'Monaco', 'Liberation Mono', 'Courier New', monospace",
       "lcdRow": 9
     },
     {
       "type": "button",
       "id": "btn_down",
+      "parentId": "footer_buttons_group",
       "label": "▼",
-      "width": 48,
-      "height": 45,
-      "font": "38px 'Fira Mono', 'Consolas', 'Menlo', 'Monaco', 'Liberation Mono', 'Courier New', monospace",
+      "width": 36,
+      "height": 30,
+      "font": "28px 'Fira Mono', 'Consolas', 'Menlo', 'Monaco', 'Liberation Mono', 'Courier New', monospace",
       "lcdRow": 9
     },
     {
       "type": "button",
       "id": "btn_up",
+      "parentId": "footer_buttons_group",
       "label": "▲",
-      "width": 48,
-      "height": 45,
-      "font": "38px 'Fira Mono', 'Consolas', 'Menlo', 'Monaco', 'Liberation Mono', 'Courier New', monospace",
+      "width": 36,
+      "height": 30,
+      "font": "28px 'Fira Mono', 'Consolas', 'Menlo', 'Monaco', 'Liberation Mono', 'Courier New', monospace",
       "lcdRow": 9
     },
     {
       "type": "button",
       "id": "btn_next",
+      "parentId": "footer_buttons_group",
       "label": "NEXT",
-      "width": 92,
-      "height": 45,
-      "font": "32px 'Fira Mono', 'Consolas', 'Menlo', 'Monaco', 'Liberation Mono', 'Courier New', monospace",
+      "width": 68,
+      "height": 30,
+      "font": "24px 'Fira Mono', 'Consolas', 'Menlo', 'Monaco', 'Liberation Mono', 'Courier New', monospace",
       "lcdRow": 9
     }
   ]

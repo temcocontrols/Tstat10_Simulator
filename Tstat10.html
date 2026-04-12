@@ -16,175 +16,85 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
+    <!-- Console pipe: auto when served by npm start (GET /__tstat_dev_probe). Off: ?consolePipe=0 -->
+    <script src="console-pipe-client.js?v=3"></script>
     <div id="app" style="position: relative; min-height: 600px;">
-        <div class="app-main-row">
-            <div id="debug-toggles" class="debug-panel-wrap">
-                <div id="debug-event-panel" class="debug-panel">
-                    <div id="debug-panel-title" class="debug-panel__header">Tstat10 Debug</div>
-                    <div class="debug-panel__body">
-                        <section class="debug-panel__section" aria-label="Display overlays">
-                            <h3 class="debug-panel__section-title">Overlays</h3>
-                            <label class="debug-panel__row"><span>Grid layer</span><input type="checkbox" id="toggle-grid-layer" checked></label>
-                            <label class="debug-panel__row"><span>Coords</span><input type="checkbox" id="toggle-coords"></label>
-                            <label class="debug-panel__row"><span>Redbox</span><input type="checkbox" id="toggle-redbox"></label>
-                            <div id="redbox-coords" class="debug-panel__redbox-tools">
-                                <span class="debug-panel__redbox-label">Position</span>
-                                <span id="redbox-coords-value" class="debug-panel__redbox-value"></span>
-                                <button type="button" id="redbox-x-btn" class="debug-panel__btn-sm" title="Adjust X">X</button>
-                                <button type="button" id="redbox-y-btn" class="debug-panel__btn-sm" title="Adjust Y">Y</button>
-                            </div>
-                        </section>
-                        <section class="debug-panel__section" aria-label="Simulation">
-                            <h3 class="debug-panel__section-title">Simulation</h3>
-                            <label class="debug-panel__row"><span>Auto keypad test</span><input type="checkbox" id="toggle-autotester"></label>
-                        </section>
-                        <section class="debug-panel__section debug-panel__section--lcd" aria-label="LCD editor">
-                            <h3 class="debug-panel__section-title">LCD editor</h3>
-                            <div class="debug-panel__lcd-grid">
-                                <label>Width <input id="editor-canvas-width" type="number" value="320"></label>
-                                <label>Height <input id="editor-canvas-height" type="number" value="480"></label>
-                                <label>Orientation
-                                    <select id="editor-orientation">
-                                        <option value="vertical">vertical</option>
-                                        <option value="horizontal">horizontal</option>
-                                    </select>
-                                </label>
-                                <label>Color mode
-                                    <select id="editor-color-mode">
-                                        <option value="indexed">indexed</option>
-                                        <option value="reduced_rgb">reduced_rgb</option>
-                                    </select>
-                                </label>
-                            </div>
-                            <div class="debug-panel__actions">
-                                <button type="button" id="editor-apply-canvas">Apply</button>
-                                <button type="button" id="editor-validate">Validate</button>
-                            </div>
-                            <pre id="editor-validation-result" class="debug-panel__validation"></pre>
-                        </section>
-                        <section class="debug-panel__section" aria-label="Live state">
-                            <h3 class="debug-panel__section-title">Live state</h3>
-                            <div id="keypad-debug-subpanel" class="debug-panel__live">
-                                <div id="keypad-debug-content">
-                                    <div class="debug-panel__live-row">
-                                        <span class="debug-panel__live-label">Keypad event</span>
-                                        <span id="debug-event-value" class="debug-panel__live-value">&nbsp;</span>
-                                    </div>
-                                    <div class="debug-panel__live-row">
-                                        <span class="debug-panel__live-label">LCD focus</span>
-                                        <span id="debug-focus-value" class="debug-panel__live-value">&nbsp;</span>
-                                    </div>
-                                    <div class="debug-panel__live-row">
-                                        <span class="debug-panel__live-label">Focus value</span>
-                                        <span id="debug-value-value" class="debug-panel__live-value">&nbsp;</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </section>
+        <div class="sls-workbench">
+            <div class="sls-topbar" role="banner">
+                <div class="sls-topbar__left">
+                    <div class="sls-topbar__brand" title="Tstat10 layout editor">Tstat10 <span class="sls-topbar__brand-sub">LCD</span></div>
+                    <div class="sls-topbar__file" id="sls-file-readout">—</div>
+                </div>
+                <div class="sls-topbar__center">
+                    <span class="sls-topbar__pill is-active">Editor</span>
+                    <span class="sls-topbar__pill sls-topbar__pill--muted">Simulation</span>
+                </div>
+                <div class="sls-topbar__right">
+                    <button type="button" class="sls-topbar__run-preview" id="sls-run-preview-btn" title="Run — save and exit layout edit (SquareLine-style preview)" aria-label="Run preview, save and exit layout edit">
+                        <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7L8 5z" fill="currentColor"/></svg>
+                    </button>
+                    <span class="sls-topbar__screen" id="sls-screen-readout">—</span>
+                    <button type="button" class="sls-topbar__fit" id="sls-fit-view" title="Fit view: reset zoom, pan, and LCD slot nudge (Alt+arrows)" aria-label="Fit view">⤢</button>
+                    <div class="sls-zoom-toolbar" role="toolbar" aria-label="Canvas zoom">
+                        <button type="button" class="sls-topbar__zoom-btn" id="sls-zoom-out" title="Zoom out (Ctrl −)" aria-label="Zoom out">−</button>
+                        <button type="button" class="sls-topbar__zoom sls-topbar__zoom--readout" id="sls-zoom-readout" title="Click: 100% · Wheel: zoom (device + Hierarchy/Widgets/Inspector together) · Scrollable panel areas still scroll · Ctrl+Plus/Minus · Middle-drag: pan · Alt+double-click: fit · Layout edit: Alt+arrows nudge LCD (Shift=8px)">100%</button>
+                        <button type="button" class="sls-topbar__zoom-btn" id="sls-zoom-in" title="Zoom in (Ctrl +)" aria-label="Zoom in">+</button>
                     </div>
                 </div>
-                <script>
-                // Live reload for network_settings.json (simple polling)
-                (function() {
-                    let lastJson = '';
-                    async function checkJsonChange() {
-                        try {
-                            const resp = await fetch('./network_settings.json?_=' + Date.now());
-                            const text = await resp.text();
-                            if (lastJson && text !== lastJson) {
-                                location.reload();
-                            }
-                            lastJson = text;
-                        } catch (e) {}
-                        setTimeout(checkJsonChange, 1500);
-                    }
-                    checkJsonChange();
-                })();
-                                                // Simulated Keypad AutoTester Checkbox
-                                                (function() {
-                                                    let autotesterActive = false;
-                                                    let autotesterTimeout = null;
-                                                    function autoTestStep() {
-                                                        if (!autotesterActive) return;
-                                                        console.log('[AutoTester] Simulating ArrowRight key press');
-                                                        const rightEvent = new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true });
-                                                        window.dispatchEvent(rightEvent);
-                                                        setTimeout(() => {
-                                                            if (!autotesterActive) return;
-                                                            console.log('[AutoTester] Simulating ArrowUp key press');
-                                                            const upEvent = new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true });
-                                                            window.dispatchEvent(upEvent);
-                                                            autotesterTimeout = setTimeout(autoTestStep, 3000);
-                                                        }, 3000);
-                                                    }
-                                                    const checkbox = document.getElementById('toggle-autotester');
-                                                    if (checkbox) {
-                                                        checkbox.addEventListener('change', function() {
-                                                            autotesterActive = checkbox.checked;
-                                                            if (autotesterActive) {
-                                                                autoTestStep();
-                                                            } else {
-                                                                if (autotesterTimeout) clearTimeout(autotesterTimeout);
-                                                            }
-                                                        });
-                                                    }
-                                                })();
-                                // Keypad toggle logic for debug subpanel
-                                (function() {
-                                    const keypadToggle = document.getElementById('toggle-keypad');
-                                    const subpanel = document.getElementById('keypad-debug-subpanel');
-                                    const content = document.getElementById('keypad-debug-content');
-                                    const placeholder = document.getElementById('keypad-debug-placeholder');
-                                    if (keypadToggle && subpanel && content && placeholder) {
-                                        function updateKeypadPanel() {
-                                            if (keypadToggle.checked) {
-                                                content.style.display = '';
-                                                placeholder.style.display = 'none';
-                                                subpanel.style.opacity = '1';
-                                            } else {
-                                                content.style.display = 'none';
-                                                placeholder.style.display = '';
-                                                subpanel.style.opacity = '0.7';
-                                            }
-                                        }
-                                        keypadToggle.addEventListener('change', updateKeypadPanel);
-                                        // Initialize on load
-                                        updateKeypadPanel();
-                                    }
-                                })();
-                // Make the debug panel draggable
-                (function() {
-                    const panel = document.getElementById('debug-event-panel');
-                    const title = document.getElementById('debug-panel-title');
-                    let isDragging = false, startX = 0, startY = 0, origX = 0, origY = 0;
-                    if (panel && title) {
-                        title.addEventListener('mousedown', function(e) {
-                            isDragging = true;
-                            startX = e.clientX;
-                            startY = e.clientY;
-                            const rect = panel.getBoundingClientRect();
-                            origX = rect.left;
-                            origY = rect.top;
-                            document.body.style.userSelect = 'none';
-                        });
-                        document.addEventListener('mousemove', function(e) {
-                            if (!isDragging) return;
-                            const dx = e.clientX - startX;
-                            const dy = e.clientY - startY;
-                            panel.style.left = (origX + dx) + 'px';
-                            panel.style.top = (origY + dy) + 'px';
-                        });
-                        document.addEventListener('mouseup', function() {
-                            isDragging = false;
-                            document.body.style.userSelect = '';
-                        });
-                    }
-                })();
-                </script>
             </div>
-            <div id="tstat-container" style="position: relative; width: 320px; height: 480px; margin: auto;">
-                <h1 style="margin-bottom: 18px; margin-top: 0; text-align: center; color: #2c3e50; font-size: 1.35em; font-family: Arial, sans-serif; font-weight: bold; letter-spacing: 1px;">Tstat10 Network Settings</h1>
-            <img id="ref-photo" src="" style="
+        <div class="app-main-row">
+            <div id="layout-widgets-panel" class="layout-widgets-panel debug-ui-hidden" aria-label="Widget palette">
+                <div class="layout-widgets-panel__header layout-widgets-panel__header--row">
+                    <span class="layout-widgets-panel__title">Widgets</span>
+                    <button type="button" id="btn-lock-save" class="layout-widgets-panel__play-btn" title="Edit layout">Edit</button>
+                </div>
+                <div class="layout-widgets-panel__body">
+                    <section class="layout-widgets-section" aria-label="Basic widgets">
+                        <div class="layout-widgets-section__title">Basic</div>
+                        <div class="layout-widgets-grid layout-widgets-grid--2">
+                            <button type="button" class="layout-widgets-tile" data-widget-add="text" title="Add a text label">Text</button>
+                            <button type="button" class="layout-widgets-tile" data-widget-add="icon" title="Add SVG icon using the asset selected in Hierarchy → Assets">Icon</button>
+                        </div>
+                    </section>
+                    <section class="layout-widgets-section" aria-label="Row widgets">
+                        <div class="layout-widgets-section__title">Rows</div>
+                        <div class="layout-widgets-grid layout-widgets-grid--2">
+                            <button type="button" class="layout-widgets-tile" data-widget-add="box" title="Label + value row">Param row</button>
+                            <button type="button" class="layout-widgets-tile" data-widget-add="row" title="Full-width menu row">Menu row</button>
+                        </div>
+                    </section>
+                    <section class="layout-widgets-section" aria-label="Hierarchy">
+                        <div class="layout-widgets-section__title">Tree</div>
+                        <div class="layout-widgets-grid layout-widgets-grid--2">
+                            <button type="button" class="layout-widgets-tile" data-widget-add="hierarchy_group" title="Invisible folder: set child widgets’ parentId to this id to nest them in the hierarchy">Tree folder</button>
+                        </div>
+                    </section>
+                </div>
+            </div>
+            <div id="debug-toggles" class="debug-panel-wrap">
+                <div id="layout-tree-panel" class="layout-tree-panel debug-ui-hidden" aria-label="Layout item tree">
+                    <div class="layout-tree-panel__tabs" role="tablist" aria-label="Panel tabs">
+                        <button type="button" class="layout-tree-panel__tab is-active" role="tab" aria-selected="true" data-layout-tree-tab="hierarchy">Hierarchy</button>
+                        <button type="button" class="layout-tree-panel__tab" role="tab" aria-selected="false" data-layout-tree-tab="assets">Assets</button>
+                    </div>
+                    <div id="layout-tree-pane-hierarchy" class="layout-tree-panel__pane">
+                        <div class="layout-tree-panel__toolbar">
+                            <label class="layout-tree-panel__search">
+                                <span class="layout-tree-panel__search-icon" aria-hidden="true">
+                                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7 12A5 5 0 1 0 7 2a5 5 0 0 0 0 10Zm0-1.2A3.8 3.8 0 1 1 7 3.2a3.8 3.8 0 0 1 0 7.6Z" fill="currentColor" opacity=".55"/><path d="m10.9 11.1 3.5 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity=".55"/></svg>
+                                </span>
+                                <input id="layout-tree-search" type="search" placeholder="Enter text..." autocomplete="off" />
+                            </label>
+                        </div>
+                        <div id="layout-tree-content" class="layout-tree-panel__content"></div>
+                    </div>
+                    <div id="layout-tree-pane-assets" class="layout-tree-panel__pane layout-tree-panel__pane--assets" hidden>
+                        <div id="layout-icon-palette-host" class="layout-assets-host"></div>
+                    </div>
+                </div>
+            </div>
+            <div id="tstat-container" class="tstat-device-shell">
+            <img id="ref-photo" class="ref-photo-layer" data-tree-node-id="shell-ref-photo" src="" alt="" style="
                 position: absolute; 
                 top: 0; left: 0; 
                 width: 100%; height: 100%; 
@@ -192,7 +102,7 @@
                 opacity: 0.5; 
                 pointer-events: none; 
                 display: none;">
-            <div class="device-bezel">
+            <div class="device-bezel" data-tree-node-id="shell-device-bezel">
                 <!-- <div class="vent-slots"></div> -->
                 <div id="tstat-lcd-container"></div>
                                 <div class="compass-logo">
@@ -220,27 +130,186 @@
                                         </g>
                                     </svg>
                                 </div>
-                <div class="physical-buttons">
-                    <button class="hw-btn" id="hw-btn-left">◀</button>
-                    <button class="hw-btn" id="hw-btn-down">▼</button>
-                    <button class="hw-btn" id="hw-btn-up">▲</button>
-                    <button class="hw-btn" id="hw-btn-right">▶</button>
+                <div class="physical-buttons" data-tree-node-id="shell-hardware-buttons">
+                    <button type="button" class="hw-btn" id="hw-btn-left" data-tree-node-id="shell-hw-left">◀</button>
+                    <button type="button" class="hw-btn" id="hw-btn-down" data-tree-node-id="shell-hw-down">▼</button>
+                    <button type="button" class="hw-btn" id="hw-btn-up" data-tree-node-id="shell-hw-up">▲</button>
+                    <button type="button" class="hw-btn" id="hw-btn-right" data-tree-node-id="shell-hw-right">▶</button>
                 </div>
+                <!-- Last in bezel so paint/hit-test order stays above LCD; z-index also set in CSS -->
+                <button
+                    type="button"
+                    id="thermostat-shell-lock-btn"
+                    data-tree-node-id="shell-lock-control"
+                    class="thermostat-shell-lock-btn thermostat-shell-lock-btn--hidden"
+                    aria-label="Enter layout edit mode"
+                    title="Enter layout edit — tap again (play) to run and save"
+                ><svg class="thermostat-shell-lock-btn__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M7 11V8a5 5 0 0 1 10 0v3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="16" r="1.2" fill="currentColor"/></svg></button>
+            </div>
+            <div id="layout-props-panel" class="layout-props-panel debug-ui-hidden" aria-label="Selected element properties">
+                <div class="layout-props-panel__header">
+                    <div class="layout-props-panel__tabs" role="tablist" aria-label="Inspector panels (SquareLine-style)">
+                        <span class="layout-props-panel__tab is-active" role="tab" aria-selected="true">Inspector</span>
+                        <span class="layout-props-panel__tab" role="tab" aria-selected="false">History</span>
+                        <span class="layout-props-panel__tab" role="tab" aria-selected="false">Font Manager</span>
+                        <span class="layout-props-panel__tab" role="tab" aria-selected="false">D&amp;D</span>
+                        <span class="layout-props-panel__tab" role="tab" aria-selected="false">Animations</span>
+                    </div>
+                </div>
+                <div id="layout-props-screen-section" class="layout-props-screen-section" aria-label="Screen canvas">
+                    <div class="layout-props-screen-section__title">Screen</div>
+                    <div class="layout-props-screen-section__grid">
+                        <label class="layout-props-screen-section__field layout-props-screen-section__field--full">LCD &amp; driver
+                            <select id="editor-lcd-preset" title="Match canvas to your panel size and driver chip"></select>
+                        </label>
+                        <p class="layout-props-screen-section__hint" id="editor-lcd-preset-hint" aria-live="polite"></p>
+                        <div class="layout-props-screen-section__canvas-readout layout-props-screen-section__field--full" role="status" aria-live="polite">
+                            <span class="layout-props-screen-section__canvas-readout-label">Canvas (pixels)</span>
+                            <span id="editor-canvas-size-readout" class="layout-props-screen-section__canvas-readout-value">240 × 320</span>
+                        </div>
+                        <p class="layout-props-screen-section__hint layout-props-screen-section__hint--canvas-size" id="editor-canvas-size-hint" hidden></p>
+                        <label class="layout-props-screen-section__field">Orientation
+                            <select id="editor-orientation" title="Portrait vs landscape; pixel width and height follow the LCD preset">
+                                <option value="vertical">Portrait (vertical)</option>
+                                <option value="horizontal">Landscape (horizontal)</option>
+                            </select>
+                        </label>
+                        <label class="layout-props-screen-section__field">Color mode
+                            <select id="editor-color-mode">
+                                <option value="indexed">indexed</option>
+                                <option value="reduced_rgb">reduced_rgb</option>
+                            </select>
+                        </label>
+                        <label class="layout-props-screen-section__field layout-props-screen-section__field--row"><span>Snap grid</span><input type="checkbox" id="toggle-grid-layer" title="Show alignment grid on the LCD"></label>
+                        <div id="editor-grid-dims-wrap" class="layout-props-screen-section__grid-dims layout-props-screen-section__field--full">
+                            <div class="layout-props-screen-section__grid-dims-head">Grid (cols × rows)</div>
+                            <div class="layout-props-screen-section__grid-dims-pair">
+                                <label class="layout-props-screen-section__grid-dim">Cols
+                                    <input id="editor-grid-cols" type="number" min="4" max="48" step="1" value="16" title="Horizontal character columns (canvas width ÷ columns)">
+                                </label>
+                                <span class="layout-props-screen-section__grid-dims-x" aria-hidden="true">×</span>
+                                <label class="layout-props-screen-section__grid-dim">Rows
+                                    <input id="editor-grid-rows" type="number" min="4" max="48" step="1" value="10" title="Vertical divisions (canvas height ÷ rows)">
+                                </label>
+                            </div>
+                            <p class="layout-props-screen-section__grid-dims-hint">Turn on Snap grid to edit; values still apply to layout when snap is off.</p>
+                        </div>
+                        <label class="layout-props-screen-section__field layout-props-screen-section__field--full">Background
+                            <input id="editor-screen-bg" class="layout-props-screen-section__bg-text" type="text" spellcheck="false" placeholder="#7bc2ce" title="Snaps to hardware palette (see AGENTS.md §15)" aria-label="Background CSS color">
+                            <div id="editor-screen-bg-palette" class="layout-props-screen-section__bg-palette" role="group" aria-label="Theme background swatches"></div>
+                            <div class="layout-props-screen-section__bg-row">
+                                <input id="editor-screen-bg-picker" type="color" value="#7bc2ce" title="Fine adjust (RGB565 — snaps to displayable steps)" aria-label="RGB565 color fine tune">
+                            </div>
+                        </label>
+                        <label class="layout-props-screen-section__field layout-props-screen-section__field--full">Color theme
+                            <select id="editor-lcd-firmware-theme" title="Firmware ThemeList (main/lcdTheme.c): background + row highlight; applies to all cached screen JSON">
+                                <option value="custom">Custom (manual)</option>
+                            </select>
+                        </label>
+                        <p class="layout-props-screen-section__hint" id="editor-lcd-firmware-theme-hint">Canned themes match <code>ThemeList[]</code> in <code>lcdTheme.c</code>. They set LCD background, menu-row highlight, and color mode to <code>reduced_rgb</code> on this screen and every other screen already in the browser cache.</p>
+                        <div class="layout-props-screen-section__apply-wrap">
+                            <button type="button" id="editor-apply-layout-remap" class="layout-props-screen-section__apply-btn" title="Scale widget positions and sizes from the last-applied canvas to the current pixel size (LCD preset + orientation)">
+                                Apply layout
+                            </button>
+                            <div id="editor-apply-layout-progress" class="layout-props-screen-section__apply-progress" hidden>
+                                <div
+                                    class="layout-props-screen-section__apply-progress-track"
+                                    role="progressbar"
+                                    aria-valuemin="0"
+                                    aria-valuemax="100"
+                                    aria-valuetext="Working"
+                                    aria-label="Apply layout progress"
+                                >
+                                    <div class="layout-props-screen-section__apply-progress-bar"></div>
+                                </div>
+                                <span id="editor-apply-layout-progress-label" class="layout-props-screen-section__apply-progress-label" aria-live="polite"></span>
+                            </div>
+                            <p class="layout-props-screen-section__apply-hint">After changing LCD size or orientation, widgets may sit off-screen until you apply. You can still nudge them manually afterward.</p>
+                        </div>
+                    </div>
+                </div>
+                <div id="debug-event-panel" class="layout-props-debug-section" aria-label="Debug">
+                    <div class="layout-props-debug-section__title">Debug</div>
+                    <div class="layout-props-debug-section__inner">
+                        <div class="layout-props-debug-section__toggles">
+                            <label class="layout-props-debug-row"><span>Auto test</span><input type="checkbox" id="toggle-autotester"></label>
+                        </div>
+                        <div id="keypad-debug-subpanel" class="layout-props-debug-live">
+                            <div id="keypad-debug-content">
+                                <div class="layout-props-debug-live__row">
+                                    <span class="layout-props-debug-live__k">Key</span>
+                                    <span id="debug-event-value" class="layout-props-debug-live__v">&nbsp;</span>
+                                </div>
+                                <div class="layout-props-debug-live__row">
+                                    <span class="layout-props-debug-live__k">Focus</span>
+                                    <span id="debug-focus-value" class="layout-props-debug-live__v">&nbsp;</span>
+                                </div>
+                                <div class="layout-props-debug-live__row">
+                                    <span class="layout-props-debug-live__k">Value</span>
+                                    <span id="debug-value-value" class="layout-props-debug-live__v">&nbsp;</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div id="layout-props-content" class="layout-props-panel__content"></div>
             </div>
         </div>
-            <script type="module" src="network-settings-renderer.js?v=20260207c"></script>
+            <script>
+            (function() {
+                let lastJson = '';
+                async function checkJsonChange() {
+                    try {
+                        const resp = await fetch('./network_settings.json?_=' + Date.now());
+                        const text = await resp.text();
+                        if (lastJson && text !== lastJson) {
+                            location.reload();
+                        }
+                        lastJson = text;
+                    } catch (e) {}
+                    setTimeout(checkJsonChange, 1500);
+                }
+                checkJsonChange();
+            })();
+            (function() {
+                let autotesterActive = false;
+                let autotesterTimeout = null;
+                function autoTestStep() {
+                    if (!autotesterActive) return;
+                    console.log('[AutoTester] Simulating ArrowRight key press');
+                    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+                    setTimeout(() => {
+                        if (!autotesterActive) return;
+                        console.log('[AutoTester] Simulating ArrowUp key press');
+                        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+                        autotesterTimeout = setTimeout(autoTestStep, 3000);
+                    }, 3000);
+                }
+                const checkbox = document.getElementById('toggle-autotester');
+                if (checkbox) {
+                    checkbox.addEventListener('change', function() {
+                        autotesterActive = checkbox.checked;
+                        if (autotesterActive) autoTestStep();
+                        else if (autotesterTimeout) clearTimeout(autotesterTimeout);
+                    });
+                }
+            })();
+            </script>
+            <script type="module" src="network-settings-renderer.js?v=20260426d"></script>
             <script src="lcd-content.js"></script>
             <!-- Logic moved to ui-bridge.js for CSP compliance -->
         </div>
-        <div style="text-align: center; margin-top: 20px; color: #222; font-family: sans-serif;">
-            <button id="show-main-photo">Show Main Photo</button>
-            <button id="show-settings-photo">Show Settings Photo</button>
-            <button id="hide-photo">Hide Photo</button>
+        <div class="sls-assets-strip" aria-label="Screen resources (SquareLine-style strip)">
+            <span class="sls-assets-strip__title">Resources</span>
+            <span class="sls-asset-chip">main_display.json</span>
+            <span class="sls-asset-chip">Icons/*.svg</span>
+            <span class="sls-asset-chip">tstat10_parameters.json</span>
+            <span class="sls-asset-chip">mock_bridge.js</span>
+        </div>
         </div>
     </div>
     <!-- Base64 image logic moved to ui-bridge.js for CSP compliance -->
     <script src="mock_bridge.js"></script>
     <script src="ui-bridge.js"></script>
-    <div id="tstat-status-line" style="position: absolute; left: 0; right: 0; bottom: 0; background: #222; color: #fff; font-family: monospace; font-size: 1.1em; padding: 8px 24px; z-index: 99999; letter-spacing: 0.5px; opacity: 0.97;">Ready.</div>
 </body>
 </html>

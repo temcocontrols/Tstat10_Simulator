@@ -54,9 +54,11 @@ This approach provides maximum flexibility for HVAC control and user interface c
 
 To maintain 1:1 parity with the ESP32's internal frame buffer (which does NOT use LVGL), the web UI uses absolute positioning:
 
-\* \*\*Resolution:\*\* Locked at 320px x 480px.
+\* \*\*Resolution:\*\* Locked at **240px × 320px** (ILI9341 logical window, matching `main/lcd.c` / ESP32 firmware).
 
-\* \*\*Styling:\*\* CSS variables define the "Temco Blue" (#1565C0) and high-contrast white borders.
+\* \*\*Simulator authoring:\*\* The layout editor can preview other LCD presets; pixel width/height follow the preset plus portrait/landscape orientation (read-only readout in the inspector; **custom** uses JSON dimensions). The canvas resizes immediately on change. **Apply layout** rescales JSON coordinates toward the new size (`applyLayoutRemapToMatchCanvas` in `lcd-editor-core.js`; see `AGENTS.md` item 14). Ship-to-device layouts should still match the production framebuffer unless a different product build is targeted.
+
+\* \*\*Styling:\*\* Screen JSON and CSS use `LcdTheme.h` RGB565 theme colors (e.g. background `#7bc2ce` ≈ `0x7E19`, highlight `#39757b` ≈ `0x3cef`). High-contrast white text/borders where applicable. In layout edit, **Inspector → Screen → Color theme** applies canned pairs from firmware `ThemeList[]` (`lcd-firmware-color-themes.js`) project-wide to cached screen JSON; see **`AGENTS.md` item 19**.
 
 \* \*\*Assets:\*\* Zero external dependencies (No React, No Bootstrap) for maximum speed on embedded web servers.
 
@@ -108,6 +110,7 @@ The UI architecture relies on a data-driven, multi-screen model to facilitate ra
 \## 6. Visual Edit Mode (WYSIWYG Engine)
 
 The simulator includes a comprehensive runtime visual editor, allowing users to build and tweak JSON layouts directly in the browser:
+\* \*\*Three authoring surfaces:\*\* **Hierarchy tree**, **on-LCD** preview, and **Inspector** panel — same selection and same JSON; see **`AGENTS.md` item 4** in this repo. Switching the selected widget **rebuilds** the inspector contents, which can produce a **brief flash**; that is intentional until incremental inspector updates exist.
 \* \*\*Drag-and-Drop Elements:\*\* Easily reorder `menu_row` items vertically via a drag-and-drop interface.
 \* \*\*Inline Modifications:\*\* Modify text labels inline and adjust alignments/widths via context menus and scroll-wheel shortcuts.
 \* \*\*Persistence:\*\* Changes lock and save directly back to the source `.json` files via a local Node.js endpoint (`http://localhost:5001/save_settings`) or over the JS Bridge via the `save_settings` action.

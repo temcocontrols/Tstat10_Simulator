@@ -1,0 +1,26 @@
+---
+description: Tstat10_Simulator dev server, console pipe log, post-test log review
+alwaysApply: true
+---
+
+# Tstat10_Simulator — agent session defaults
+
+## Environment (start of substantive work)
+
+1. **Working directory:** project root `Tstat10_Simulator` (where `package.json` and `Tstat10.html` live).
+2. **Dev server:** Prefer **`npm start`** (runs `node tools/dev-server.mjs`, default **http://127.0.0.1:8787**). This enables **POST /log**, **GET /__tstat_dev_probe** (console pipe auto-detection), and correct static hosting for ES modules.
+3. **Do not** use `python -m http.server` for agent-driven simulator work unless the user explicitly asks — no console pipe, no `logs/browser-console.log`.
+4. If a server is already listening, reuse it or use `PORT=... npm start` only when needed. Open **`http://127.0.0.1:8787/Tstat10.html`** (or the printed URL).
+
+## Browser console log (for debugging)
+
+- Piped console output is appended to **`logs/browser-console.log`** (created by the dev server when logs arrive).
+- After **any** of the following, **read that file** (tail last ~80–200 lines, or full if small) and factor findings into your diagnosis:
+  - Playwright / e2e / `npm test` (if present) or any automated browser run against this app
+  - In-app **Auto test** (debug panel) or manual steps the agent asked the user to run
+  - Any self-check where the simulator UI was exercised while `npm start` was running
+- If the file is missing or empty, say so — usually means the dev server was not used or nothing was logged yet.
+
+## Save server (optional)
+
+- Persisting JSON edits: **`npm run save-server`** (or `node save-server.mjs`) on port **5001** when the user needs disk saves (see `agents.md`).
