@@ -1,27 +1,27 @@
 {
   "page": "PROVISIONING_SETUP",
   "styles": {
-    "bg": "#2c7cc4",
-    "highlight": "#008080",
+    "bg": "#7bc2ce",
+    "highlight": "#39757b",
     "fontFamily": "'Fira Mono', 'Consolas', 'Menlo', 'Monaco', 'Liberation Mono', 'Courier New', monospace",
     "fontWeight": "900",
-    "fontSize": "26px"
+    "fontSize": "22px"
   },
   "layout": {
-    "lcdCanvas": { "width": 320, "height": 480 },
+    "lcdCanvas": { "width": 240, "height": 320 },
     "lcdTextRows": 10,
     "lcdTextColumns": 16,
-    "labelColumnLayout": { "x": 20, "width": 140 },
-    "valueColumnLayout": { "x": 180, "width": 150 },
-    "menuRowPixelHeight": 48,
-    "headerLayout": { "x": 160, "y": 40, "align": "center", "font": "FONT_18_BOLD" },
-    "footerLayout": { "x": 0, "y": 435, "width": 320, "height": 48 },
-    "footerTopPadding": 6,
-    "footerBottomPadding": 10,
-    "buttonGap": 6,
-    "menuRowLeftPadding": 16,
-    "valueBoxRightPadding": 6,
-    "valueBoxLeftPadding": 6,
+    "labelColumnLayout": { "x": 14, "width": 104 },
+    "valueColumnLayout": { "x": 134, "width": 106 },
+    "menuRowPixelHeight": 32,
+    "headerLayout": { "x": 120, "y": 24, "align": "center", "font": "FONT_18_BOLD" },
+    "footerLayout": { "x": 0, "y": 272, "width": 240, "height": 48 },
+    "footerTopPadding": 4,
+    "footerBottomPadding": 8,
+    "buttonGap": 4,
+    "menuRowLeftPadding": 12,
+    "valueBoxRightPadding": 4,
+    "valueBoxLeftPadding": 4,
     "valueBoxTextAlign": "right"
   },
   "widgets": [
@@ -29,8 +29,8 @@
     {
       "type": "header",
       "text": "Wi‑Fi setup",
-      "x": 160,
-      "y": 36,
+      "x": 120,
+      "y": 24,
       "align": "center",
       "font": "FONT_18_BOLD",
       "lcdRow": 2
@@ -39,10 +39,10 @@
       "type": "label",
       "id": "prov_rssi_icon",
       "text": "",
-      "x": 308,
-      "y": 8,
+      "x": 228,
+      "y": 6,
       "align": "right",
-      "width": 36,
+      "width": 28,
       "color": "#ffffff"
     },
     {
@@ -51,8 +51,8 @@
       "label": "AP",
       "value": "Tstat10-Setup",
       "lcdRow": 3,
-      "labelWidth": 56,
-      "valueWidth": 244,
+      "labelWidth": 48,
+      "valueWidth": 168,
       "notes": "SoftAP name"
     },
     {
@@ -61,8 +61,8 @@
       "label": "Pass",
       "value": "****",
       "lcdRow": 4,
-      "labelWidth": 52,
-      "valueWidth": 248,
+      "labelWidth": 48,
+      "valueWidth": 168,
       "notes": "Filled automatically after success"
     },
     {
@@ -72,8 +72,8 @@
       "options": ["Ready", "Connecting", "Requesting", "Success", "Failed", "WiFi connected"],
       "value": "Ready",
       "lcdRow": 5,
-      "labelWidth": 72,
-      "valueWidth": 228,
+      "labelWidth": 54,
+      "valueWidth": 162,
       "notes": "Connect to Phone drives progress; credentials apply automatically"
     },
     {
@@ -82,8 +82,8 @@
       "label": "RSSI",
       "value": "-68 dBm",
       "lcdRow": 6,
-      "labelWidth": 52,
-      "valueWidth": 248,
+      "labelWidth": 48,
+      "valueWidth": 168,
       "notes": "Simulated dBm; value box wide enough for “No signal” / dBm text"
     },
     {
@@ -92,29 +92,29 @@
       "label": "Signal",
       "value": "Good",
       "lcdRow": 7,
-      "labelWidth": 56,
-      "valueWidth": 244,
+      "labelWidth": 48,
+      "valueWidth": 168,
       "notes": "Qualitative: Weak … Excellent vs provisioning status"
     },
     {
       "type": "button",
       "id": "btn_connect_phone",
       "label": "Connect to Phone",
-      "width": 280,
-      "height": 44,
-      "x": 20,
-      "y": 352,
-      "font": "16px 'Fira Mono', 'Consolas', monospace"
+      "width": 210,
+      "height": 30,
+      "x": 15,
+      "y": 232,
+      "font": "14px 'Fira Mono', 'Consolas', monospace"
     },
     {
       "type": "button",
       "id": "btn_back",
       "label": "Back",
-      "width": 280,
-      "height": 40,
-      "x": 20,
-      "y": 408,
-      "font": "15px 'Fira Mono', 'Consolas', monospace"
+      "width": 210,
+      "height": 28,
+      "x": 15,
+      "y": 276,
+      "font": "13px 'Fira Mono', 'Consolas', monospace"
     }
   ]
 }

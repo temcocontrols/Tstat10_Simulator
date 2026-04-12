@@ -2,32 +2,104 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Tstat10: dev server (static + console pipe)",
+      "label": "Simulator: Start dev server",
       "type": "shell",
-      "command": "npm run start",
+      "command": "npm start",
       "options": {
-        "cwd": "${workspaceFolder}",
-        "env": {
-          "OPEN_BROWSER": "0"
-        }
+        "cwd": "${workspaceFolder}"
       },
       "isBackground": true,
       "problemMatcher": {
-        "owner": "tstat10-dev",
+        "owner": "tstat10",
         "pattern": { "regexp": "^$" },
         "background": {
           "activeOnStart": true,
           "beginsPattern": ".",
-          "endsPattern": "listening on http://127\\.0\\.0\\.1:"
+          "endsPattern": "listening on"
         }
       },
-      "runOptions": {
-        "runOn": "folderOpen"
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
       },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "Simulator: First-time setup",
+      "type": "shell",
+      "command": "npm run setup",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Simulator: Run E2E smoke tests",
+      "type": "shell",
+      "command": "npm run test:e2e",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "group": "test"
+    },
+    {
+      "label": "Simulator: Lint (full project)",
+      "type": "shell",
+      "command": "npm run lint",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
       "presentation": {
         "reveal": "silent",
-        "panel": "dedicated",
-        "showReuseMessage": false
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Simulator: Save server (JSON to disk)",
+      "type": "shell",
+      "command": "npm run save-server",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "tstat10",
+        "pattern": { "regexp": "^$" },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".",
+          "endsPattern": "\\[save-server\\]"
+        }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Simulator: Doctor + probe dev ports",
+      "type": "shell",
+      "command": "npm run doctor -- --probe",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
       }
     }
   ]

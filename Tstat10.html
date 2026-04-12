@@ -16,8 +16,8 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- Console pipe: on by default via npm start (tools/dev-server.mjs). Off: ?consolePipe=0 -->
-    <script src="console-pipe-client.js"></script>
+    <!-- Console pipe: auto when served by npm start (GET /__tstat_dev_probe). Off: ?consolePipe=0 -->
+    <script src="console-pipe-client.js?v=3"></script>
     <div id="app" style="position: relative; min-height: 600px;">
         <div class="sls-workbench">
             <div class="sls-topbar" role="banner">
@@ -30,12 +30,14 @@
                     <span class="sls-topbar__pill sls-topbar__pill--muted">Simulation</span>
                 </div>
                 <div class="sls-topbar__right">
-                    <button type="button" class="sls-topbar__edit-lock" id="sls-edit-lock-toggle" title="Unlock layout edit (Tstat10)" aria-label="Unlock layout edit">🔒</button>
+                    <button type="button" class="sls-topbar__run-preview" id="sls-run-preview-btn" title="Run — save and exit layout edit (SquareLine-style preview)" aria-label="Run preview, save and exit layout edit">
+                        <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7L8 5z" fill="currentColor"/></svg>
+                    </button>
                     <span class="sls-topbar__screen" id="sls-screen-readout">—</span>
-                    <button type="button" class="sls-topbar__fit" id="sls-fit-view" title="Fit view (reset zoom and pan)" aria-label="Fit view">⤢</button>
+                    <button type="button" class="sls-topbar__fit" id="sls-fit-view" title="Fit view: reset zoom, pan, and LCD slot nudge (Alt+arrows)" aria-label="Fit view">⤢</button>
                     <div class="sls-zoom-toolbar" role="toolbar" aria-label="Canvas zoom">
                         <button type="button" class="sls-topbar__zoom-btn" id="sls-zoom-out" title="Zoom out (Ctrl −)" aria-label="Zoom out">−</button>
-                        <button type="button" class="sls-topbar__zoom sls-topbar__zoom--readout" id="sls-zoom-readout" title="Click: 100% · Wheel on device: zoom · Ctrl+Plus/Minus · Middle-drag: pan · Alt+double-click: fit">100%</button>
+                        <button type="button" class="sls-topbar__zoom sls-topbar__zoom--readout" id="sls-zoom-readout" title="Click: 100% · Wheel: zoom (device + Hierarchy/Widgets/Inspector together) · Scrollable panel areas still scroll · Ctrl+Plus/Minus · Middle-drag: pan · Alt+double-click: fit · Layout edit: Alt+arrows nudge LCD (Shift=8px)">100%</button>
                         <button type="button" class="sls-topbar__zoom-btn" id="sls-zoom-in" title="Zoom in (Ctrl +)" aria-label="Zoom in">+</button>
                     </div>
                 </div>
@@ -51,7 +53,7 @@
                         <div class="layout-widgets-section__title">Basic</div>
                         <div class="layout-widgets-grid layout-widgets-grid--2">
                             <button type="button" class="layout-widgets-tile" data-widget-add="text" title="Add a text label">Text</button>
-                            <button type="button" class="layout-widgets-tile" data-widget-add="icon" title="Add SVG icon from library">Icon</button>
+                            <button type="button" class="layout-widgets-tile" data-widget-add="icon" title="Add SVG icon using the asset selected in Hierarchy → Assets">Icon</button>
                         </div>
                     </section>
                     <section class="layout-widgets-section" aria-label="Row widgets">
@@ -61,9 +63,11 @@
                             <button type="button" class="layout-widgets-tile" data-widget-add="row" title="Full-width menu row">Menu row</button>
                         </div>
                     </section>
-                    <section class="layout-widgets-section" aria-label="Icon library">
-                        <div class="layout-widgets-section__title">Icon library</div>
-                        <div id="layout-icon-palette-host"></div>
+                    <section class="layout-widgets-section" aria-label="Hierarchy">
+                        <div class="layout-widgets-section__title">Tree</div>
+                        <div class="layout-widgets-grid layout-widgets-grid--2">
+                            <button type="button" class="layout-widgets-tile" data-widget-add="hierarchy_group" title="Invisible folder: set child widgets’ parentId to this id to nest them in the hierarchy">Tree folder</button>
+                        </div>
                     </section>
                 </div>
             </div>
@@ -71,21 +75,26 @@
                 <div id="layout-tree-panel" class="layout-tree-panel debug-ui-hidden" aria-label="Layout item tree">
                     <div class="layout-tree-panel__tabs" role="tablist" aria-label="Panel tabs">
                         <button type="button" class="layout-tree-panel__tab is-active" role="tab" aria-selected="true" data-layout-tree-tab="hierarchy">Hierarchy</button>
-                        <button type="button" class="layout-tree-panel__tab" role="tab" aria-selected="false" disabled title="Not wired in simulator">Console</button>
+                        <button type="button" class="layout-tree-panel__tab" role="tab" aria-selected="false" data-layout-tree-tab="assets">Assets</button>
                     </div>
-                    <div class="layout-tree-panel__toolbar">
-                        <label class="layout-tree-panel__search">
-                            <span class="layout-tree-panel__search-icon" aria-hidden="true">
-                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7 12A5 5 0 1 0 7 2a5 5 0 0 0 0 10Zm0-1.2A3.8 3.8 0 1 1 7 3.2a3.8 3.8 0 0 1 0 7.6Z" fill="currentColor" opacity=".55"/><path d="m10.9 11.1 3.5 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity=".55"/></svg>
-                            </span>
-                            <input id="layout-tree-search" type="search" placeholder="Enter text..." autocomplete="off" />
-                        </label>
+                    <div id="layout-tree-pane-hierarchy" class="layout-tree-panel__pane">
+                        <div class="layout-tree-panel__toolbar">
+                            <label class="layout-tree-panel__search">
+                                <span class="layout-tree-panel__search-icon" aria-hidden="true">
+                                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7 12A5 5 0 1 0 7 2a5 5 0 0 0 0 10Zm0-1.2A3.8 3.8 0 1 1 7 3.2a3.8 3.8 0 0 1 0 7.6Z" fill="currentColor" opacity=".55"/><path d="m10.9 11.1 3.5 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity=".55"/></svg>
+                                </span>
+                                <input id="layout-tree-search" type="search" placeholder="Enter text..." autocomplete="off" />
+                            </label>
+                        </div>
+                        <div id="layout-tree-content" class="layout-tree-panel__content"></div>
                     </div>
-                    <div id="layout-tree-content" class="layout-tree-panel__content"></div>
+                    <div id="layout-tree-pane-assets" class="layout-tree-panel__pane layout-tree-panel__pane--assets" hidden>
+                        <div id="layout-icon-palette-host" class="layout-assets-host"></div>
+                    </div>
                 </div>
             </div>
             <div id="tstat-container" class="tstat-device-shell">
-            <img id="ref-photo" src="" style="
+            <img id="ref-photo" class="ref-photo-layer" data-tree-node-id="shell-ref-photo" src="" alt="" style="
                 position: absolute; 
                 top: 0; left: 0; 
                 width: 100%; height: 100%; 
@@ -93,7 +102,7 @@
                 opacity: 0.5; 
                 pointer-events: none; 
                 display: none;">
-            <div class="device-bezel">
+            <div class="device-bezel" data-tree-node-id="shell-device-bezel">
                 <!-- <div class="vent-slots"></div> -->
                 <div id="tstat-lcd-container"></div>
                                 <div class="compass-logo">
@@ -121,27 +130,21 @@
                                         </g>
                                     </svg>
                                 </div>
-                <div class="physical-buttons">
-                    <button class="hw-btn" id="hw-btn-left">◀</button>
-                    <button class="hw-btn" id="hw-btn-down">▼</button>
-                    <button class="hw-btn" id="hw-btn-up">▲</button>
-                    <button class="hw-btn" id="hw-btn-right">▶</button>
+                <div class="physical-buttons" data-tree-node-id="shell-hardware-buttons">
+                    <button type="button" class="hw-btn" id="hw-btn-left" data-tree-node-id="shell-hw-left">◀</button>
+                    <button type="button" class="hw-btn" id="hw-btn-down" data-tree-node-id="shell-hw-down">▼</button>
+                    <button type="button" class="hw-btn" id="hw-btn-up" data-tree-node-id="shell-hw-up">▲</button>
+                    <button type="button" class="hw-btn" id="hw-btn-right" data-tree-node-id="shell-hw-right">▶</button>
                 </div>
                 <!-- Last in bezel so paint/hit-test order stays above LCD; z-index also set in CSS -->
                 <button
                     type="button"
-                    id="thermostat-lock-toggle"
-                    class="thermostat-lock-toggle"
-                    aria-label="Toggle layout edit mode"
-                    title="Toggle layout edit mode"
-                >🔓</button>
-                <button
-                    type="button"
-                    id="phone-send-creds-btn"
-                    class="phone-send-creds-btn phone-send-creds-btn--hidden"
-                    aria-label="Send password from phone (simulated)"
-                    title="Dev shortcut: same as Get Password — simulate the app sending the home Wi‑Fi password (provisioning only)"
-                >📱</button>
+                    id="thermostat-shell-lock-btn"
+                    data-tree-node-id="shell-lock-control"
+                    class="thermostat-shell-lock-btn thermostat-shell-lock-btn--hidden"
+                    aria-label="Enter layout edit mode"
+                    title="Enter layout edit — tap again (play) to run and save"
+                ><svg class="thermostat-shell-lock-btn__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M7 11V8a5 5 0 0 1 10 0v3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="16" r="1.2" fill="currentColor"/></svg></button>
             </div>
             <div id="layout-props-panel" class="layout-props-panel debug-ui-hidden" aria-label="Selected element properties">
                 <div class="layout-props-panel__header">
@@ -156,12 +159,19 @@
                 <div id="layout-props-screen-section" class="layout-props-screen-section" aria-label="Screen canvas">
                     <div class="layout-props-screen-section__title">Screen</div>
                     <div class="layout-props-screen-section__grid">
-                        <label class="layout-props-screen-section__field">Width <input id="editor-canvas-width" type="number" min="1" value="320"></label>
-                        <label class="layout-props-screen-section__field">Height <input id="editor-canvas-height" type="number" min="1" value="480"></label>
+                        <label class="layout-props-screen-section__field layout-props-screen-section__field--full">LCD &amp; driver
+                            <select id="editor-lcd-preset" title="Match canvas to your panel size and driver chip"></select>
+                        </label>
+                        <p class="layout-props-screen-section__hint" id="editor-lcd-preset-hint" aria-live="polite"></p>
+                        <div class="layout-props-screen-section__canvas-readout layout-props-screen-section__field--full" role="status" aria-live="polite">
+                            <span class="layout-props-screen-section__canvas-readout-label">Canvas (pixels)</span>
+                            <span id="editor-canvas-size-readout" class="layout-props-screen-section__canvas-readout-value">240 × 320</span>
+                        </div>
+                        <p class="layout-props-screen-section__hint layout-props-screen-section__hint--canvas-size" id="editor-canvas-size-hint" hidden></p>
                         <label class="layout-props-screen-section__field">Orientation
-                            <select id="editor-orientation">
-                                <option value="vertical">vertical</option>
-                                <option value="horizontal">horizontal</option>
+                            <select id="editor-orientation" title="Portrait vs landscape; pixel width and height follow the LCD preset">
+                                <option value="vertical">Portrait (vertical)</option>
+                                <option value="horizontal">Landscape (horizontal)</option>
                             </select>
                         </label>
                         <label class="layout-props-screen-section__field">Color mode
@@ -170,13 +180,58 @@
                                 <option value="reduced_rgb">reduced_rgb</option>
                             </select>
                         </label>
+                        <label class="layout-props-screen-section__field layout-props-screen-section__field--row"><span>Snap grid</span><input type="checkbox" id="toggle-grid-layer" title="Show alignment grid on the LCD"></label>
+                        <div id="editor-grid-dims-wrap" class="layout-props-screen-section__grid-dims layout-props-screen-section__field--full">
+                            <div class="layout-props-screen-section__grid-dims-head">Grid (cols × rows)</div>
+                            <div class="layout-props-screen-section__grid-dims-pair">
+                                <label class="layout-props-screen-section__grid-dim">Cols
+                                    <input id="editor-grid-cols" type="number" min="4" max="48" step="1" value="16" title="Horizontal character columns (canvas width ÷ columns)">
+                                </label>
+                                <span class="layout-props-screen-section__grid-dims-x" aria-hidden="true">×</span>
+                                <label class="layout-props-screen-section__grid-dim">Rows
+                                    <input id="editor-grid-rows" type="number" min="4" max="48" step="1" value="10" title="Vertical divisions (canvas height ÷ rows)">
+                                </label>
+                            </div>
+                            <p class="layout-props-screen-section__grid-dims-hint">Turn on Snap grid to edit; values still apply to layout when snap is off.</p>
+                        </div>
+                        <label class="layout-props-screen-section__field layout-props-screen-section__field--full">Background
+                            <input id="editor-screen-bg" class="layout-props-screen-section__bg-text" type="text" spellcheck="false" placeholder="#7bc2ce" title="Snaps to hardware palette (see AGENTS.md §15)" aria-label="Background CSS color">
+                            <div id="editor-screen-bg-palette" class="layout-props-screen-section__bg-palette" role="group" aria-label="Theme background swatches"></div>
+                            <div class="layout-props-screen-section__bg-row">
+                                <input id="editor-screen-bg-picker" type="color" value="#7bc2ce" title="Fine adjust (RGB565 — snaps to displayable steps)" aria-label="RGB565 color fine tune">
+                            </div>
+                        </label>
+                        <label class="layout-props-screen-section__field layout-props-screen-section__field--full">Color theme
+                            <select id="editor-lcd-firmware-theme" title="Firmware ThemeList (main/lcdTheme.c): background + row highlight; applies to all cached screen JSON">
+                                <option value="custom">Custom (manual)</option>
+                            </select>
+                        </label>
+                        <p class="layout-props-screen-section__hint" id="editor-lcd-firmware-theme-hint">Canned themes match <code>ThemeList[]</code> in <code>lcdTheme.c</code>. They set LCD background, menu-row highlight, and color mode to <code>reduced_rgb</code> on this screen and every other screen already in the browser cache.</p>
+                        <div class="layout-props-screen-section__apply-wrap">
+                            <button type="button" id="editor-apply-layout-remap" class="layout-props-screen-section__apply-btn" title="Scale widget positions and sizes from the last-applied canvas to the current pixel size (LCD preset + orientation)">
+                                Apply layout
+                            </button>
+                            <div id="editor-apply-layout-progress" class="layout-props-screen-section__apply-progress" hidden>
+                                <div
+                                    class="layout-props-screen-section__apply-progress-track"
+                                    role="progressbar"
+                                    aria-valuemin="0"
+                                    aria-valuemax="100"
+                                    aria-valuetext="Working"
+                                    aria-label="Apply layout progress"
+                                >
+                                    <div class="layout-props-screen-section__apply-progress-bar"></div>
+                                </div>
+                                <span id="editor-apply-layout-progress-label" class="layout-props-screen-section__apply-progress-label" aria-live="polite"></span>
+                            </div>
+                            <p class="layout-props-screen-section__apply-hint">After changing LCD size or orientation, widgets may sit off-screen until you apply. You can still nudge them manually afterward.</p>
+                        </div>
                     </div>
                 </div>
                 <div id="debug-event-panel" class="layout-props-debug-section" aria-label="Debug">
                     <div class="layout-props-debug-section__title">Debug</div>
                     <div class="layout-props-debug-section__inner">
                         <div class="layout-props-debug-section__toggles">
-                            <label class="layout-props-debug-row"><span>Grid</span><input type="checkbox" id="toggle-grid-layer" checked></label>
                             <label class="layout-props-debug-row"><span>Auto test</span><input type="checkbox" id="toggle-autotester"></label>
                         </div>
                         <div id="keypad-debug-subpanel" class="layout-props-debug-live">
@@ -240,7 +295,7 @@
                 }
             })();
             </script>
-            <script type="module" src="network-settings-renderer.js?v=20260426"></script>
+            <script type="module" src="network-settings-renderer.js?v=20260426d"></script>
             <script src="lcd-content.js"></script>
             <!-- Logic moved to ui-bridge.js for CSP compliance -->
         </div>

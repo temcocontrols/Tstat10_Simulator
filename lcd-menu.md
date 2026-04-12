@@ -38,6 +38,9 @@ The LCD menu system provides user interaction for temperature control, setpoint 
 - Highlighted menu item is visually distinct
 - Error and confirmation messages are shown as overlays
 
+## Layout editor: LCD size and Apply layout
+In **layout edit** mode, **Inspector → Screen** controls the logical canvas (`canvasProfile`). Choosing a different **LCD & driver** preset or changing width, height, or orientation **immediately** resizes the rendered LCD to match the new hardware dimensions. Widget positions in JSON are unchanged until the user clicks **Apply layout**, which runs a remap from the stored baseline size to the current canvas (layout columns, paddings, row pitch, and pixel widget geometry). After large changes, some widgets may sit off-screen and need manual nudging. Details: [`AGENTS.md`](AGENTS.md) item **14**, implementation in [`lcd-editor-core.js`](lcd-editor-core.js).
+
 ## Extensibility
 - All menu logic and display text should be managed in lcd-content.js and styled in lcd-content.css
 - Enclosure and hardware styles must not be affected by menu changes
@@ -45,7 +48,7 @@ The LCD menu system provides user interaction for temperature control, setpoint 
 ## Tstat10 Mockup Plan: LVGL-JSON Architecture
 
 1. **Phase 1 Goal: The Data-Driven Mockup**
-   - The immediate objective is to build a web-based simulator where the UI is not hardcoded in HTML. Instead, the simulator will "listen" for a JSON payload that describes the UI using LVGL-style structures and render it dynamically on a 320x480 canvas.
+   - The immediate objective is to build a web-based simulator where the UI is not hardcoded in HTML. Instead, the simulator will "listen" for a JSON payload that describes the UI using LVGL-style structures and render it dynamically on a **240×320** canvas (ILI9341 / Tstat ESP32 firmware default).
 
 ### The Component Hierarchy
 - The JSON will define the UI as an array of objects. Each object maps directly to an LVGL widget type:
@@ -59,7 +62,7 @@ The LCD menu system provides user interaction for temperature control, setpoint 
 
 2. **Technical Implementation (The "Renderer")**
    - The other agent needs to build a small JavaScript "Engine" inside simulator.js to handle the transition.
-   - **Clear Screen:** Every time a new "menu description" is received, the 320x480 viewport is cleared.
+   - **Clear Screen:** Every time a new "menu description" is received, the **240×320** viewport is cleared.
    - **Iterate & Create:** The engine loops through the JSON array and creates DOM elements with position: absolute.
    - **Coordinate Mapping:** The x and y values in the JSON are used directly as left and top CSS pixels to ensure 1:1 hardware parity.
 

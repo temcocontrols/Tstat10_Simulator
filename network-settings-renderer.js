@@ -1,24 +1,7 @@
-// Auto tester: simulate right arrow key every 3 seconds on startup
-function startAutoTester() {
-    function autoTestStep() {
-        console.log('[AutoTester] Simulating ArrowRight key press');
-        const rightEvent = new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true });
-        window.dispatchEvent(rightEvent);
-        setTimeout(() => {
-            console.log('[AutoTester] Simulating ArrowUp key press');
-            const upEvent = new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true });
-            window.dispatchEvent(upEvent);
-            // Schedule next cycle after 3 seconds
-            setTimeout(autoTestStep, 3000);
-        }, 3000);
-    }
-    autoTestStep();
-}
 // network-settings-renderer.js
 // Dynamically renders the Network Settings menu from network-settings.json into #tstat-lcd-container
 
-import { getRedboxCoords, redbox, resetRedbox } from './coords.js';
-import { renderRedboxOverlay, updateRedboxDebugPanel } from './ui.js';
+import { updateRedboxDebugPanel } from './ui.js';
 import { handleRedboxArrowKey } from './events.js';
 import { setupDebugToggles } from './debug-toggles.js';
 import { updateDebugPanel } from './debug-panel-fixed.js';
@@ -29,8 +12,208 @@ import {
     attachFloatingPanelDrag,
     widgetAcceptsChildren,
     normalizeWidgetTreeOrder,
-    isWidgetDescendantOf
+    isWidgetDescendantOf,
+    applyLayoutRemapToMatchCanvas
 } from './lcd-editor-core.js';
+import {
+    LCD_PLATFORM_PRESETS,
+    resolveLcdPresetSelection,
+    getLcdPresetById,
+    canvasPixelSizeForPresetOrientation,
+    inferOrientationFromPresetAndCanvas
+} from './lcd-platform-presets.js';
+import {
+    TSTAT10_LCD_WIDTH,
+    TSTAT10_LCD_HEIGHT,
+    TSTAT10_FW_BG_CSS,
+    TSTAT10_FW_HIGHLIGHT_CSS,
+    TSTAT10_MENU_ROW_PX_DEFAULT,
+    TSTAT10_LEGACY_DEVKIT_LCD_W,
+    TSTAT10_LEGACY_DEVKIT_LCD_H
+} from './tstat10-firmware-display.js';
+import {
+    clampBackgroundToColorMode,
+    quantizeCssColorToRgb565Hex,
+    rgb565ToCssHex,
+    LCD_THEME_RGB565_SWATCHES,
+    INDEXED_BACKGROUND_SWATCHES
+} from './lcd-authoring-colors.js';
+import {
+    FIRMWARE_LCD_COLOR_THEME_LIST,
+    FIRMWARE_LCD_THEME_CUSTOM_ID,
+    findMatchingFirmwareThemeId,
+    applyFirmwareColorThemeToScreenData
+} from './lcd-firmware-color-themes.js';
+import {
+    PROJECT_SCREEN_JSON_PATHS,
+    ROUTE_TO_JSON_PATH,
+    DEFAULT_STARTUP_JSON_PATH
+} from './screen-paths.js';
+import { getLcdLibDiskSync, ensureLcdLibDiskCache } from './lcd-lib-client.js';
+
+function resolvedScreenBackgroundCss(data) {
+    const raw = (data?.styles?.bg || TSTAT10_FW_BG_CSS).trim() || TSTAT10_FW_BG_CSS;
+    const mode = data?.colorProfile?.mode || 'indexed';
+    return clampBackgroundToColorMode(raw, mode);
+}
+
+const DEFAULT_LCD_W = TSTAT10_LCD_WIDTH;
+const DEFAULT_LCD_H = TSTAT10_LCD_HEIGHT;
+
+/** Inspector → Screen: `layout.lcdTextColumns` / `lcdTextRows` bounds (overlay + horizontal snap). */
+const LCD_GRID_COLS_MIN = 4;
+const LCD_GRID_COLS_MAX = 48;
+const LCD_GRID_ROWS_MIN = 4;
+const LCD_GRID_ROWS_MAX = 48;
+
+function clampGridDimensionInput(value, min, max, fallback) {
+    const n = Math.round(Number(value));
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(min, Math.min(max, n));
+}
+
+/** Logical canvas width from screen JSON (fallback: `TSTAT10_LCD_WIDTH`). */
+function canvasLogicalWidthPx(data) {
+    return (
+        Number(
+            data?.layout?.lcdCanvas?.width ||
+                data?.layout?.canvas?.width ||
+                data?.canvasProfile?.width ||
+                DEFAULT_LCD_W
+        ) || DEFAULT_LCD_W
+    );
+}
+
+/** Logical canvas height from screen JSON (fallback: `TSTAT10_LCD_HEIGHT`). */
+function canvasLogicalHeightPx(data) {
+    return (
+        Number(
+            data?.layout?.lcdCanvas?.height ||
+                data?.layout?.canvas?.height ||
+                data?.canvasProfile?.height ||
+                DEFAULT_LCD_H
+        ) || DEFAULT_LCD_H
+    );
+}
+
+/** True when a stored pixel dimension is within `tol` of a legacy template value. */
+function nearIntPx(a, b, tol = 2) {
+    return Math.abs(Number(a) - Number(b)) < tol;
+}
+
+/** Parse #rrggbb for grid tinting; returns null if not a 6-digit hex. */
+function parseHexColorRgb(hex) {
+    const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(String(hex || '').trim());
+    if (!m) return null;
+    return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
+}
+
+/** `#rrggbb` for `<input type="color">`, or null if the string is not a usable CSS color. */
+function cssColorToHex6ForPicker(css) {
+    const raw = String(css || '').trim();
+    if (!raw) return null;
+    const rgb = parseHexColorRgb(raw);
+    if (rgb) {
+        const h = (n) => ('0' + n.toString(16)).slice(-2);
+        return `#${h(rgb.r)}${h(rgb.g)}${h(rgb.b)}`;
+    }
+    const m3 = /^#([a-f\d])([a-f\d])([a-f\d])$/i.exec(raw);
+    if (m3) {
+        const e = (c) => ('0' + parseInt(c + c, 16).toString(16)).slice(-2);
+        return `#${e(m3[1])}${e(m3[2])}${e(m3[3])}`;
+    }
+    try {
+        const el = document.createElement('span');
+        el.style.color = '';
+        el.style.color = raw;
+        if (!el.style.color) return null;
+        document.documentElement.appendChild(el);
+        const computed = getComputedStyle(el).color;
+        el.remove();
+        const m = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/.exec(computed);
+        if (!m) return null;
+        const toH = (n) =>
+            ('0' + Math.max(0, Math.min(255, parseInt(n, 10))).toString(16)).slice(-2);
+        return `#${toH(m[1])}${toH(m[2])}${toH(m[3])}`;
+    } catch {
+        return null;
+    }
+}
+
+/** Grid overlay: lighter wash from `styles.bg`, slightly brighter lines. */
+function lcdGridOverlayColorsFromBg(bgCss) {
+    const rgb = parseHexColorRgb(bgCss);
+    if (!rgb) {
+        return {
+            wash: 'rgba(255,255,255,0.12)',
+            line: 'rgba(255,255,255,0.35)'
+        };
+    }
+    const mix = (t) => ({
+        r: Math.round(rgb.r + (255 - rgb.r) * t),
+        g: Math.round(rgb.g + (255 - rgb.g) * t),
+        b: Math.round(rgb.b + (255 - rgb.b) * t)
+    });
+    const w = mix(0.12);
+    const ln = mix(0.38);
+    return {
+        wash: `rgba(${w.r},${w.g},${w.b},0.35)`,
+        line: `rgba(${ln.r},${ln.g},${ln.b},0.65)`
+    };
+}
+
+function injectLcdSnapGridOverlay(lcdEl, screenData, widthPx, heightPx) {
+    if (!lcdEl) return;
+    const prev = lcdEl.querySelector('.debug-grid');
+    if (prev) prev.remove();
+    if (!window._tstatShowGridLayer) return;
+    const data = screenData || window._currentScreenData;
+    if (!data) return;
+    const rows = data.layout?.lcdTextRows || 10;
+    const cols = data.layout?.lcdTextColumns || 16;
+    const w = Math.max(1, Number(widthPx) || DEFAULT_LCD_W);
+    const h = Math.max(1, Number(heightPx) || DEFAULT_LCD_H);
+    const cellW = w / cols;
+    const cellH = h / rows;
+    const bg = resolvedScreenBackgroundCss(data);
+    const { wash, line } = lcdGridOverlayColorsFromBg(bg);
+
+    const grid = document.createElement('div');
+    grid.className = 'debug-grid';
+    grid.style.zIndex = '0';
+    grid.style.pointerEvents = 'none';
+    grid.style.position = 'absolute';
+    grid.style.left = '0';
+    grid.style.top = '0';
+    grid.style.width = `${w}px`;
+    grid.style.height = `${h}px`;
+    grid.style.background = wash;
+    grid.style.boxSizing = 'border-box';
+
+    for (let c = 1; c < cols; c++) {
+        const vline = document.createElement('div');
+        vline.style.position = 'absolute';
+        vline.style.left = `${c * cellW}px`;
+        vline.style.top = '0';
+        vline.style.width = '1px';
+        vline.style.height = `${h}px`;
+        vline.style.background = line;
+        vline.style.zIndex = '1';
+        grid.appendChild(vline);
+    }
+    for (let r = 1; r <= rows; r++) {
+        const hline = document.createElement('div');
+        hline.style.position = 'absolute';
+        hline.style.left = '0';
+        hline.style.top = `${(r - 1) * cellH}px`;
+        hline.style.width = `${w}px`;
+        hline.style.height = '1px';
+        hline.style.background = line;
+        hline.style.zIndex = '1';
+        grid.appendChild(hline);
+    }
+    lcdEl.insertBefore(grid, lcdEl.firstChild);
+}
 
 const SIMULATED_LR_LONG_PRESS_MS = 3000;
 let _leftRightLongPressTimer = null;
@@ -145,6 +328,113 @@ function loadScreenFromCache(jsonPath) {
     }
 }
 
+/** Workbench LCD translate (Alt+arrows / edge drag) — mirror globals ↔ `canvasProfile` so cache + JSON drafts stay aligned. */
+function syncWorkbenchNudgeIntoScreenDataForCache(data) {
+    if (!data || typeof data !== 'object') return;
+    if (!data.canvasProfile) data.canvasProfile = {};
+    data.canvasProfile.previewOffsetX = Math.round(Number(window._tstatLcdNudgeX) || 0);
+    data.canvasProfile.previewOffsetY = Math.round(Number(window._tstatLcdNudgeY) || 0);
+}
+
+function mergeProjectBackgroundIntoScreenData(screenData, bgCss) {
+    if (!screenData || typeof screenData !== 'object' || typeof bgCss !== 'string' || !bgCss.trim()) return;
+    const v = bgCss.trim();
+    if (!screenData.styles) screenData.styles = {};
+    screenData.styles.bg = v;
+    if (screenData.colorProfile && typeof screenData.colorProfile === 'object') {
+        if (!screenData.colorProfile.themeTokens) screenData.colorProfile.themeTokens = {};
+        screenData.colorProfile.themeTokens.bg = v;
+    }
+}
+
+/** Project-wide: LCD background + row highlight (`lcdTheme.c` backgroundColor / backgroundColor1). */
+function mergeProjectFirmwareThemeIntoScreenData(screenData, bgCss, highlightCss, colorMode) {
+    if (!screenData || typeof screenData !== 'object') return;
+    const bg = String(bgCss || '').trim();
+    const hl = String(highlightCss || '').trim();
+    if (!bg || !hl) return;
+    mergeProjectBackgroundIntoScreenData(screenData, bg);
+    if (!screenData.styles) screenData.styles = {};
+    screenData.styles.highlight = hl;
+    if (screenData.colorProfile && typeof screenData.colorProfile === 'object') {
+        if (!screenData.colorProfile.themeTokens) screenData.colorProfile.themeTokens = {};
+        screenData.colorProfile.themeTokens.accent = hl;
+        if (typeof colorMode === 'string' && (colorMode === 'indexed' || colorMode === 'reduced_rgb')) {
+            screenData.colorProfile.mode = colorMode;
+        }
+    }
+}
+
+function propagateProjectWideFirmwareTheme(bgCss, highlightCss, currentJsonPath, colorMode) {
+    const cur = String(currentJsonPath || window._currentJsonPath || '');
+    const bg = String(bgCss || '').trim();
+    const hl = String(highlightCss || '').trim();
+    if (!bg || !hl) return;
+    for (const rel of PROJECT_SCREEN_JSON_PATHS) {
+        if (rel === cur) continue;
+        const cached = loadScreenFromCache(rel);
+        if (cached) {
+            mergeProjectFirmwareThemeIntoScreenData(cached, bg, hl, colorMode);
+            saveScreenToCache(rel, cached);
+        }
+    }
+    const missing = PROJECT_SCREEN_JSON_PATHS.filter((rel) => rel !== cur && !loadScreenFromCache(rel));
+    if (missing.length === 0) return;
+    Promise.all(
+        missing.map((rel) =>
+            fetch(`${rel}?_=${Date.now()}`)
+                .then((r) => {
+                    if (!r.ok) throw new Error(String(r.status));
+                    return r.json();
+                })
+                .then((j) => {
+                    mergeProjectFirmwareThemeIntoScreenData(j, bg, hl, colorMode);
+                    saveScreenToCache(rel, j);
+                })
+                .catch(() => {})
+        )
+    ).then(() => {
+        /* no-op */
+    });
+}
+
+/**
+ * SquareLine-style project theme (phase 1): one shared LCD background for every screen JSON.
+ * Updates localStorage cache for each path; fetches uncached files from disk and caches them.
+ * Exception pages can be added later (e.g. skip list or per-page overrides).
+ */
+function propagateProjectWideBackground(bgCss, currentJsonPath) {
+    const cur = String(currentJsonPath || window._currentJsonPath || '');
+    const bg = String(bgCss || '').trim();
+    if (!bg) return;
+    for (const rel of PROJECT_SCREEN_JSON_PATHS) {
+        if (rel === cur) continue;
+        const cached = loadScreenFromCache(rel);
+        if (cached) {
+            mergeProjectBackgroundIntoScreenData(cached, bg);
+            saveScreenToCache(rel, cached);
+        }
+    }
+    const missing = PROJECT_SCREEN_JSON_PATHS.filter((rel) => rel !== cur && !loadScreenFromCache(rel));
+    if (missing.length === 0) return;
+    Promise.all(
+        missing.map((rel) =>
+            fetch(`${rel}?_=${Date.now()}`)
+                .then((r) => {
+                    if (!r.ok) throw new Error(String(r.status));
+                    return r.json();
+                })
+                .then((j) => {
+                    mergeProjectBackgroundIntoScreenData(j, bg);
+                    saveScreenToCache(rel, j);
+                })
+                .catch(() => {})
+        )
+    ).then(() => {
+        /* no-op: status already written from apply path */
+    });
+}
+
 function getIconPaletteStorageKey() {
     return 'tstat_icon_palette_custom_svgs_v2';
 }
@@ -185,26 +475,49 @@ function saveCustomPaletteSvgs(list) {
     }
 }
 
+/**
+ * Simulator uses one logical framebuffer for every route (same as production Tstat10).
+ * Normalizes JSON/cache so navigation never resizes the LCD or flips orientation.
+ */
+function enforceSimulatorFixedLcdCanvas(data) {
+    if (!data || typeof data !== 'object') return;
+    const w = TSTAT10_LCD_WIDTH;
+    const h = TSTAT10_LCD_HEIGHT;
+    if (!data.canvasProfile) data.canvasProfile = {};
+    data.canvasProfile.width = w;
+    data.canvasProfile.height = h;
+    data.canvasProfile.orientation = 'vertical';
+    data.canvasProfile.lcdPresetId = 'tstat10_fw_240';
+    if (!data.layout) data.layout = {};
+    data.layout.lcdCanvas = { width: w, height: h };
+    data.layout.canvas = { width: w, height: h };
+    data.layout.orientation = 'vertical';
+}
+
 function ensureMainDisplayIconLayout(data) {
     if (!data || data.page !== 'MAIN_DISPLAY') return;
     if (!Array.isArray(data.widgets)) data.widgets = [];
-    const maxY = 480 - 64;
+    const ch = Number(data.layout?.lcdCanvas?.height || data.canvasProfile?.height || DEFAULT_LCD_H);
+    const cw = Number(data.layout?.lcdCanvas?.width || data.canvasProfile?.width || DEFAULT_LCD_W);
+    const maxY = Math.max(0, ch - 64);
     const clampY = (y) => Math.max(0, Math.min(maxY, Number(y || 0)));
     const iconIds = ['main_icon_day_night', 'main_icon_occupied', 'main_icon_heat_cool', 'main_icon_fan'];
     const group = data.widgets.find((w) => w?.id === 'main_icons_group');
     const parts = data.widgets.filter((w) => iconIds.includes(w?.id));
 
     if (!group && parts.length === 0) {
+        const stripW = Math.max(120, cw - 16);
+        const innerW = Math.max(100, stripW - 24);
         data.widgets.push({
             type: 'label',
             id: 'main_icons_group',
-            text: '<div style="display:flex;gap:10px;justify-content:center;align-items:center;width:296px;box-sizing:border-box;padding:0 8px"></div>',
-            x: 160,
-            y: 400,
+            text: `<div style="display:flex;gap:10px;justify-content:center;align-items:center;width:${innerW}px;box-sizing:border-box;padding:0 8px"></div>`,
+            x: Math.round(cw / 2),
+            y: Math.min(maxY, ch - 72),
             align: 'center',
             color: '#ffffff',
             wrap: true,
-            width: 320
+            width: stripW
         });
     }
 
@@ -244,9 +557,8 @@ function inferMenuRowTreeName(widget) {
         ui_item_mask: 'Subnet Mask',
         ui_item_gw: 'Gateway',
         ui_item_dhcp: 'DHCP',
-        ui_item_prov_ap: 'Provisioning AP',
-        ui_item_prov_pwd: 'Provisioning Password',
         ui_item_prov_ap: 'AP',
+        ui_item_prov_pwd: 'Provisioning Password',
         ui_item_prov_ssid: 'Network (from phone)',
         ui_item_prov_pass: 'Pass',
         ui_item_prov_status: 'Status',
@@ -361,7 +673,12 @@ function renderMainIconsGroupText(widget) {
         ['fan', bindings.fan || 'VAR3']
     ];
     const html = icons.map(([iconKey, point]) => buildMainIconMarkup(iconKey, asBoolean(getT3000PointValue(point)))).join('');
-    return `<div style="display:flex;gap:10px;justify-content:center;align-items:center;width:296px;box-sizing:border-box;padding:0 8px">${html}</div>`;
+    const cw = canvasLogicalWidthPx(window._currentScreenData || {});
+    const sx = cw / TSTAT10_LEGACY_DEVKIT_LCD_W;
+    const innerW = Math.max(120, Math.round(296 * sx));
+    const gap = Math.max(4, Math.round(10 * sx));
+    const padH = Math.max(4, Math.round(8 * sx));
+    return `<div style="display:flex;gap:${gap}px;justify-content:center;align-items:center;width:${innerW}px;box-sizing:border-box;padding:0 ${padH}px">${html}</div>`;
 }
 
 function isIpv4RowId(rowId) {
@@ -388,6 +705,11 @@ function ungroupMainIcons() {
     if (groupIdx === -1) return false;
     const group = widgets[groupIdx];
     window._mainIconsGroupTemplate = JSON.parse(JSON.stringify(group));
+    const cw = canvasLogicalWidthPx(data);
+    const ch = canvasLogicalHeightPx(data);
+    const sx = cw / TSTAT10_LEGACY_DEVKIT_LCD_W;
+    const sy = ch / TSTAT10_LEGACY_DEVKIT_LCD_H;
+    /** Positions tuned on legacy 320×480 sim; scaled to current logical canvas. */
     const iconDefs = [
         { id: 'main_icon_day_night', x: 79, y: 352, title: 'Day / night', svg: '<svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="13" cy="20" r="5" fill="#fff"/><path d="M13 11v2M13 27v2M7 20h2M17 20h2" stroke="#fff" stroke-width="1.3" stroke-linecap="round"/><circle cx="33" cy="20" r="7" fill="#fff"/><circle cx="37" cy="20" r="6.5" fill="#2c7cc4"/></svg>' },
         { id: 'main_icon_occupied', x: 143, y: 352, title: 'Occupied / unoccupied', svg: '<svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10 28 L24 16 L38 28" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/><rect x="12" y="28" width="24" height="12" stroke="#fff" stroke-width="1.5" fill="none"/><path d="M20 40v-7h8v7" stroke="#fff" stroke-width="1.2" fill="none"/><circle cx="24" cy="33" r="2.5" fill="#fff"/><path d="M24 35.5v3.5" stroke="#fff" stroke-width="1.3" stroke-linecap="round"/><path d="M21 38h6" stroke="#fff" stroke-width="1.3" stroke-linecap="round"/></svg>' },
@@ -398,8 +720,8 @@ function ungroupMainIcons() {
         type: 'label',
         id: d.id,
         text: `<div style="width:54px;height:54px;border:1px solid #fff;border-radius:4px;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.1)" title="${d.title}">${d.svg}</div>`,
-        x: d.x,
-        y: d.y,
+        x: Math.round(Number(d.x) * sx),
+        y: Math.round(Number(d.y) * sy),
         align: 'center',
         color: '#ffffff'
     }));
@@ -411,23 +733,31 @@ function regroupMainIcons() {
     const data = window._currentScreenData;
     if (!data || data.page !== 'MAIN_DISPLAY') return false;
     const widgets = data.widgets || [];
+    const cw = canvasLogicalWidthPx(data);
+    const ch = canvasLogicalHeightPx(data);
+    const sx = cw / TSTAT10_LEGACY_DEVKIT_LCD_W;
+    const sy = ch / TSTAT10_LEGACY_DEVKIT_LCD_H;
+    const defaultIconRowY = Math.round(352 * sy);
     const ids = ['main_icon_day_night', 'main_icon_occupied', 'main_icon_heat_cool', 'main_icon_fan'];
     const parts = widgets.filter((w) => ids.includes(w.id));
     if (parts.length !== 4) return false;
-    const minX = Math.min(...parts.map((p) => Number(p.x || 160)));
-    const avgY = Math.round(parts.reduce((a, b) => a + Number(b.y || 352), 0) / parts.length);
+    const minX = Math.min(...parts.map((p) => Number(p.x || Math.round(160 * sx))));
+    const avgY = Math.round(parts.reduce((a, b) => a + Number(b.y || defaultIconRowY), 0) / parts.length);
+    const gapT = Math.max(4, Math.round(10 * sx));
+    const padT = Math.max(4, Math.round(8 * sx));
+    const innerWT = Math.max(120, Math.round(296 * sx));
     const template = window._mainIconsGroupTemplate || {
         type: 'label',
         id: 'main_icons_group',
-        text: '<div style="display:flex;gap:10px;justify-content:center;align-items:center;width:296px;box-sizing:border-box;padding:0 8px"></div>',
-        x: 160,
-        y: 352,
+        text: `<div style="display:flex;gap:${gapT}px;justify-content:center;align-items:center;width:${innerWT}px;box-sizing:border-box;padding:0 ${padT}px"></div>`,
+        x: Math.round(160 * sx),
+        y: defaultIconRowY,
         align: 'center',
         color: '#ffffff',
         wrap: true,
-        width: 320
+        width: Math.round(320 * sx)
     };
-    const grouped = { ...template, id: 'main_icons_group', x: minX + 96, y: avgY, align: 'center' };
+    const grouped = { ...template, id: 'main_icons_group', x: minX + Math.round(96 * sx), y: avgY, align: 'center' };
     const firstIdx = widgets.findIndex((w) => ids.includes(w.id));
     const filtered = widgets.filter((w) => !ids.includes(w.id));
     filtered.splice(firstIdx >= 0 ? firstIdx : filtered.length, 0, grouped);
@@ -463,8 +793,7 @@ function openCanvasWidgetPickMenu(e) {
         if (!id || seen.has(id)) continue;
         seen.add(id);
         const data = window._currentScreenData;
-        const nodes = data ? buildPageNodes(data) : [];
-        const n = nodes.find((x) => x.id === id);
+        const n = data ? findLayoutTreeNodeById(id, data) : null;
         picks.push({ id, label: (n && n.text) ? String(n.text) : id });
     }
     if (picks.length === 0) return;
@@ -547,6 +876,124 @@ function getParentIdSelectOptions(widgets, selectedIdx) {
 
 function openTreeContextMenu(e, node, jsonPath, rerender) {
     removeExistingTreeContextMenu();
+    if (node?.childKind === 'lcd_outline') {
+        const menu = document.createElement('div');
+        menu.id = 'layout-tree-context-menu';
+        menu.style.position = 'fixed';
+        menu.style.left = `${e.clientX}px`;
+        menu.style.top = `${e.clientY}px`;
+        menu.style.zIndex = '10030';
+        menu.style.background = '#111827';
+        menu.style.color = '#e5e7eb';
+        menu.style.border = '1px solid #374151';
+        menu.style.borderRadius = '8px';
+        menu.style.boxShadow = '0 8px 24px rgba(0,0,0,0.35)';
+        menu.style.padding = '6px';
+        menu.style.minWidth = '210px';
+        menu.style.fontFamily = 'Segoe UI, Inter, Arial, sans-serif';
+        menu.style.fontSize = '12px';
+        const addItem = (label, handler) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.textContent = label;
+            btn.style.display = 'block';
+            btn.style.width = '100%';
+            btn.style.textAlign = 'left';
+            btn.style.padding = '6px 8px';
+            btn.style.border = 'none';
+            btn.style.borderRadius = '6px';
+            btn.style.background = 'transparent';
+            btn.style.color = '#e5e7eb';
+            btn.style.cursor = 'pointer';
+            btn.addEventListener('mouseenter', () => { btn.style.background = '#1f2937'; });
+            btn.addEventListener('mouseleave', () => { btn.style.background = 'transparent'; });
+            btn.onclick = () => {
+                handler?.();
+                menu.remove();
+            };
+            menu.appendChild(btn);
+        };
+        addItem('Reset LCD position (workbench)', () => {
+            window._tstatLcdNudgeX = 0;
+            window._tstatLcdNudgeY = 0;
+            window._persistTstatLcdNudge?.();
+            window._applyTstatLcdNudgeTransform?.();
+            window._syncTstatLcdEdgeDragLayer?.();
+            const d = window._currentScreenData;
+            if (d?.canvasProfile) {
+                d.canvasProfile.previewOffsetX = 0;
+                d.canvasProfile.previewOffsetY = 0;
+            }
+            rerender(jsonPath);
+        });
+        addItem('Undo', () => window._undoLayoutChange?.());
+        document.body.appendChild(menu);
+        setTimeout(() => {
+            const closeOnOutside = (evt) => {
+                if (!menu.contains(evt.target)) {
+                    menu.remove();
+                    document.removeEventListener('mousedown', closeOnOutside);
+                }
+            };
+            document.addEventListener('mousedown', closeOnOutside);
+        }, 0);
+        return;
+    }
+    if (node?.childKind === 'shell_hw_group' || node?.childKind === 'shell_hw_button' || node?.childKind === 'shell_ref_photo') {
+        const menu = document.createElement('div');
+        menu.id = 'layout-tree-context-menu';
+        menu.style.position = 'fixed';
+        menu.style.left = `${e.clientX}px`;
+        menu.style.top = `${e.clientY}px`;
+        menu.style.zIndex = '10030';
+        menu.style.background = '#111827';
+        menu.style.color = '#e5e7eb';
+        menu.style.border = '1px solid #374151';
+        menu.style.borderRadius = '8px';
+        menu.style.boxShadow = '0 8px 24px rgba(0,0,0,0.35)';
+        menu.style.padding = '6px';
+        menu.style.minWidth = '210px';
+        menu.style.fontFamily = 'Segoe UI, Inter, Arial, sans-serif';
+        menu.style.fontSize = '12px';
+        const addItem = (label, handler) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.textContent = label;
+            btn.style.display = 'block';
+            btn.style.width = '100%';
+            btn.style.textAlign = 'left';
+            btn.style.padding = '6px 8px';
+            btn.style.border = 'none';
+            btn.style.borderRadius = '6px';
+            btn.style.background = 'transparent';
+            btn.style.color = '#e5e7eb';
+            btn.style.cursor = 'pointer';
+            btn.addEventListener('mouseenter', () => { btn.style.background = '#1f2937'; });
+            btn.addEventListener('mouseleave', () => { btn.style.background = 'transparent'; });
+            btn.onclick = () => {
+                handler?.();
+                menu.remove();
+            };
+            menu.appendChild(btn);
+        };
+        if (node.childKind === 'shell_ref_photo') {
+            addItem('Hide reference overlay', () => {
+                if (typeof window._hideShellRefPhoto === 'function') window._hideShellRefPhoto();
+            });
+        }
+        addItem('Undo', () => window._undoLayoutChange?.());
+        document.body.appendChild(menu);
+        setTimeout(() => {
+            const closeOnOutside = (evt) => {
+                if (!menu.contains(evt.target)) {
+                    menu.remove();
+                    document.removeEventListener('mousedown', closeOnOutside);
+                }
+            };
+            document.addEventListener('mousedown', closeOnOutside);
+        }, 0);
+        return;
+    }
     const menu = document.createElement('div');
     menu.id = 'layout-tree-context-menu';
     menu.style.position = 'fixed';
@@ -608,6 +1055,15 @@ function openTreeContextMenu(e, node, jsonPath, rerender) {
         else widget.treeName = clean;
         rerender(jsonPath);
     });
+
+    if (
+        widget &&
+        (isWidgetNode || node?.childKind === 'label' || node?.childKind === 'value' || node?.childKind === 'group_icon')
+    ) {
+        addItem('Edit properties…', () => {
+            openPropertyEditorMenu(e, node, () => rerender(jsonPath));
+        });
+    }
 
     if (isWidgetNode && widgetIndex >= 0) {
         addItem('Duplicate', () => {
@@ -699,6 +1155,14 @@ function getLayoutTreeNodeLayoutClasses(n) {
     if (n.childKind === 'label') parts.push('layout-tree-node--part-label');
     else if (n.childKind === 'value') parts.push('layout-tree-node--part-value');
     else if (n.childKind === 'group_icon') parts.push('layout-tree-node--part-icon');
+    else if (n.childKind === 'lcd_outline') parts.push('layout-tree-node--lcd-outline');
+    else if (n.childKind === 'shell_hw_group') parts.push('layout-tree-node--shell-hw-group');
+    else if (n.childKind === 'shell_hw_button') parts.push('layout-tree-node--shell-hw-btn');
+    else if (n.childKind === 'shell_ref_photo') parts.push('layout-tree-node--shell-ref-photo');
+    else if (n.childKind === 'tstat_body_folder') parts.push('layout-tree-node--tstat-body-folder');
+    else if (n.childKind === 'shell_bezel') parts.push('layout-tree-node--shell-bezel');
+    else if (n.childKind === 'shell_compass_logo') parts.push('layout-tree-node--shell-compass');
+    else if (n.childKind === 'shell_lock_control') parts.push('layout-tree-node--shell-lock');
     return parts.join(' ');
 }
 
@@ -745,6 +1209,142 @@ function layoutTreeSelectionMatchesNode(selectedId, nodeId) {
     return false;
 }
 
+/** Widget array index for any hierarchy row id: `w-3`, `w-3-label`, `w-3-value`, `w-3-icon-day_night`, … */
+function parseWidgetIndexFromLayoutTreeNodeId(id) {
+    const m = String(id || '').match(/^w-(\d+)/);
+    return m ? Number(m[1]) : -1;
+}
+
+function stripTreeNamePastePrefixes(raw) {
+    return String(raw || '')
+        .replace(/^row\s*::\s*/i, '')
+        .replace(/^label\s*::\s*/i, '')
+        .replace(/^icon\s*::\s*/i, '')
+        .replace(/^menu_row\s*::\s*/i, '')
+        .replace(/^header\s*::\s*/i, '')
+        .trim();
+}
+
+/**
+ * In-tree rename for a widget row (treeName). Used by hierarchy double-click and F2.
+ * @param {HTMLElement} label
+ * @param {object} widgetRef
+ * @param {string} displaySnapshotText  Text restored on Escape / initial state
+ * @param {string} jsonPath
+ * @param {(path: string) => void} rerender
+ */
+function setupWidgetTreeLabelRename(label, widgetRef, displaySnapshotText, jsonPath, rerender) {
+    if (!label || !widgetRef) return;
+    if (label.isContentEditable === 'true') return;
+    cancelDebouncedSelectLayoutRender();
+    label.contentEditable = 'true';
+    label.focus();
+    document.getSelection()?.selectAllChildren(label);
+    const commitRename = () => {
+        label.contentEditable = 'false';
+        const raw = label.innerText.trim();
+        if (!raw) {
+            delete widgetRef.treeName;
+        } else {
+            widgetRef.treeName = stripTreeNamePastePrefixes(raw);
+        }
+        rerender(jsonPath);
+    };
+    const cancelRename = () => {
+        label.contentEditable = 'false';
+        label.textContent = displaySnapshotText;
+    };
+    const onKey = (kevt) => {
+        if (kevt.key === 'Enter') {
+            kevt.preventDefault();
+            label.removeEventListener('keydown', onKey);
+            commitRename();
+        } else if (kevt.key === 'Escape') {
+            kevt.preventDefault();
+            label.removeEventListener('keydown', onKey);
+            cancelRename();
+        }
+    };
+    label.addEventListener('keydown', onKey);
+    label.addEventListener(
+        'blur',
+        () => {
+            label.removeEventListener('keydown', onKey);
+            commitRename();
+        },
+        { once: true }
+    );
+}
+
+function tryLcdInlineRenameFromLayoutSelection() {
+    const lcd = document.getElementById('tstat-lcd-container');
+    const sel = window._layoutSelectedNodeId;
+    if (!lcd || !sel) return false;
+    let el = lcd.querySelector(`[data-tree-node-id="${sel}"]`);
+    const idx = parseWidgetIndexFromLayoutTreeNodeId(sel);
+    if (!el && idx >= 0) el = lcd.querySelector(`[data-tree-node-id="w-${idx}"]`);
+    let walk = el;
+    while (walk && walk !== lcd) {
+        if (typeof walk._startInlineEdit === 'function') {
+            walk._startInlineEdit();
+            return true;
+        }
+        walk = walk.parentElement;
+    }
+    return false;
+}
+
+function explorerRenameHotkeyFocusBlocksRename() {
+    const ae = document.activeElement;
+    if (!ae) return false;
+    if (ae.closest?.('#layout-props-panel') && (ae.closest('input, textarea, select') || ae.isContentEditable)) {
+        return true;
+    }
+    if (ae.closest?.('#layout-widgets-panel') && ae.closest?.('input, textarea, select')) return true;
+    if (ae.closest?.('#layout-tree-search')) return true;
+    if (ae.matches?.('input, textarea, select')) return true;
+    if (ae.isContentEditable) return true;
+    return false;
+}
+
+/**
+ * F2 / Explorer-style rename: tree row for widget (treeName) when that row exists, else LCD inline edit if wired.
+ */
+function tryBeginExplorerTreeOrLcdRename() {
+    if (!window._isVisualEditMode || !document.body.classList.contains('visual-edit-shell')) return false;
+    if (explorerRenameHotkeyFocusBlocksRename()) return false;
+    const idx = parseWidgetIndexFromLayoutTreeNodeId(window._layoutSelectedNodeId);
+    const jp = window._currentJsonPath;
+    const widgets = window._currentScreenData?.widgets;
+    if (idx >= 0 && Array.isArray(widgets) && widgets[idx]) {
+        const row = document.querySelector(`#layout-tree-content [data-layout-node-id="w-${idx}"]`);
+        const label = row?.querySelector?.('.layout-tree-node__label');
+        if (label && !label.isContentEditable) {
+            setupWidgetTreeLabelRename(label, widgets[idx], label.textContent, jp, renderScreen);
+            return true;
+        }
+    }
+    return tryLcdInlineRenameFromLayoutSelection();
+}
+
+function bindExplorerRenameHotkeysOnce() {
+    if (window._explorerRenameHotkeysBound) return;
+    window._explorerRenameHotkeysBound = true;
+    document.addEventListener(
+        'keydown',
+        (e) => {
+            if (e.key !== 'F2') return;
+            if (!window._isVisualEditMode || !document.body.classList.contains('visual-edit-shell')) return;
+            if (explorerRenameHotkeyFocusBlocksRename()) return;
+            if (tryBeginExplorerTreeOrLcdRename()) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+        },
+        true
+    );
+}
+
 /** Logical Y inside LCD (0 = top) from screen coordinates; correct when the bezel is CSS-scaled. */
 function lcdClientYToLocalY(clientY, lcdElement) {
     if (!lcdElement) return 0;
@@ -766,7 +1366,7 @@ function lcdClientToLocalXY(clientX, clientY, lcdElement) {
 }
 
 function snapLcdCoordQuarter(valuePx, screenData) {
-    const cw = Number(screenData?.layout?.lcdCanvas?.width || screenData?.layout?.canvas?.width || 320);
+    const cw = canvasLogicalWidthPx(screenData);
     const cols = Number(screenData?.layout?.lcdTextColumns || 16);
     const step = Math.max(2, cw / Math.max(1, cols) / 4);
     return Math.round(Number(valuePx) / step) * step;
@@ -805,10 +1405,10 @@ function bindLcdPaletteIconDropOnce(lcd) {
         const widgets = data?.widgets;
         if (!Array.isArray(widgets) || !pal?.svg) return;
 
-        const path = window._currentJsonPath || './main_display.json';
+        const path = window._currentJsonPath || DEFAULT_STARTUP_JSON_PATH;
         const { x: lx, y: ly } = lcdClientToLocalXY(evt.clientX, evt.clientY, lcd);
-        const cw = Number(data?.layout?.lcdCanvas?.width || data?.layout?.canvas?.width || 320);
-        const ch = Number(data?.layout?.lcdCanvas?.height || data?.layout?.canvas?.height || 480);
+        const cw = canvasLogicalWidthPx(data);
+        const ch = canvasLogicalHeightPx(data);
         const defaultW = Math.max(32, snapLcdCoordQuarter(40, data));
         let x = snapLcdCoordQuarter(lx - defaultW / 2, data);
         let y = snapLcdCoordQuarter(ly - defaultW / 2, data);
@@ -878,7 +1478,7 @@ function syncSlStudioWorkbenchChrome(jsonPath, data) {
 function applyRowSlotReorderAtLocalY(draggedWidget, localY, widgets, menuRowPixelHeight, canvasLogicalHeight) {
     if (!isRowSlotWidget(draggedWidget) || !Array.isArray(widgets)) return false;
     const h = Math.max(24, menuRowPixelHeight);
-    const maxRow = Math.max(1, Math.floor(Math.max(h, Number(canvasLogicalHeight) || 480) / h));
+    const maxRow = Math.max(1, Math.floor(Math.max(h, Number(canvasLogicalHeight) || DEFAULT_LCD_H) / h));
     const targetRow = Math.max(1, Math.min(maxRow, Math.floor(localY / h) + 1));
 
     const blocker = widgets.find(
@@ -904,6 +1504,99 @@ function applyRowSlotReorderAtLocalY(draggedWidget, localY, widgets, menuRowPixe
     return false;
 }
 
+/** Fixed shell DOM in `Tstat10.html`; tree ids match `data-tree-node-id` (not screen JSON widgets). */
+const SHELL_REFERENCE_PHOTO_TREE_ID = 'shell-ref-photo';
+const SHELL_HARDWARE_GROUP_TREE_ID = 'shell-hardware-buttons';
+const TSTAT_BODY_FOLDER_ID = 'tstat-body';
+const SHELL_HARDWARE_BUTTON_ROWS = [
+    { treeId: 'shell-hw-left', role: 'left', label: '◀ Left', mapsTo: 'ArrowLeft' },
+    { treeId: 'shell-hw-down', role: 'down', label: '▼ Down', mapsTo: 'ArrowDown' },
+    { treeId: 'shell-hw-up', role: 'up', label: '▲ Up', mapsTo: 'ArrowUp' },
+    { treeId: 'shell-hw-right', role: 'right', label: '▶ Right', mapsTo: 'ArrowRight' }
+];
+
+/** Device chrome only — shown once under **Tstatbody** in the hierarchy (not duplicated per screen JSON). */
+function buildTstatShellTreeNodes() {
+    const nodes = [];
+    nodes.push({
+        id: TSTAT_BODY_FOLDER_ID,
+        text: 'Tstatbody',
+        icon: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5 6h6M5 9h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
+        status: 'ok',
+        widget: null,
+        indent: 0,
+        childKind: 'tstat_body_folder'
+    });
+    nodes.push({
+        id: 'shell-device-bezel',
+        text: 'Device bezel',
+        icon: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.2"/><rect x="4.5" y="5" width="7" height="6" rx="0.8" fill="currentColor" opacity=".2"/></svg>',
+        status: 'ok',
+        widget: null,
+        indent: 1,
+        childKind: 'shell_bezel'
+    });
+    nodes.push({
+        id: 'lcd-outline',
+        text: 'LCD outline (viewport)',
+        icon: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="3" width="11" height="9" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5 14h6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
+        status: 'ok',
+        widget: null,
+        indent: 1,
+        childKind: 'lcd_outline'
+    });
+    nodes.push({
+        id: 'shell-compass-logo',
+        text: 'Compass / logo artwork',
+        icon: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M8 3v2M8 11v2M3 8h2M11 8h2" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>',
+        status: 'ok',
+        widget: null,
+        indent: 1,
+        childKind: 'shell_compass_logo'
+    });
+    nodes.push({
+        id: SHELL_HARDWARE_GROUP_TREE_ID,
+        text: 'Hardware buttons (simulated)',
+        icon: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="6" width="3.2" height="5" rx="0.5" fill="currentColor" opacity=".45"/><rect x="6.4" y="6" width="3.2" height="5" rx="0.5" fill="currentColor" opacity=".45"/><rect x="11.3" y="6" width="3.2" height="5" rx="0.5" fill="currentColor" opacity=".45"/><path d="M8 2.5v2.5M8 11v2.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
+        status: 'ok',
+        widget: null,
+        indent: 1,
+        childKind: 'shell_hw_group'
+    });
+    SHELL_HARDWARE_BUTTON_ROWS.forEach((row) => {
+        nodes.push({
+            id: row.treeId,
+            text: `Key :: ${row.label} → ${row.mapsTo}`,
+            icon: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M8 6v4M6 8h4" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>',
+            status: 'ok',
+            widget: null,
+            indent: 2,
+            childKind: 'shell_hw_button',
+            shellHwRole: row.role
+        });
+    });
+    nodes.push({
+        id: SHELL_REFERENCE_PHOTO_TREE_ID,
+        text: 'Thermostat reference image',
+        icon: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="9" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/><circle cx="5.5" cy="6.5" r="1.2" fill="currentColor" opacity=".35"/><path d="M9 9l4 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
+        status: 'ok',
+        widget: null,
+        indent: 1,
+        childKind: 'shell_ref_photo'
+    });
+    nodes.push({
+        id: 'shell-lock-control',
+        text: 'Layout lock (bezel)',
+        icon: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="7" width="8" height="6" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M6 7V5a2 2 0 0 1 4 0v2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
+        status: 'ok',
+        widget: null,
+        indent: 1,
+        childKind: 'shell_lock_control'
+    });
+    return nodes;
+}
+
+/** Screen JSON widgets only (LCD content). Shell chrome lives in `buildTstatShellTreeNodes`. */
 function buildPageNodes(data) {
     const iconForWidget = (w) => {
         if (w.type === 'button') {
@@ -1043,6 +1736,13 @@ function buildPageNodes(data) {
     rootIndices.sort((a, b) => a - b);
     rootIndices.forEach((i) => emitSubtree(widgets[i], i, 0, new Set()));
     return nodes;
+}
+
+function findLayoutTreeNodeById(id, data) {
+    if (!id) return null;
+    const shellHit = buildTstatShellTreeNodes().find((n) => n.id === id);
+    if (shellHit) return shellHit;
+    return buildPageNodes(data).find((n) => n.id === id);
 }
 
 function openPropertyEditorMenu(e, node, onApply) {
@@ -1248,26 +1948,330 @@ function renderLayoutTreePanel(data, jsonPath, rerender) {
         { key: 'oat', name: 'Outside Air Temp' },
         { key: 'tbd', name: 'To Be Done' }
     ];
-    const pageToJsonPath = {
-        main: './main_display.json',
-        setup: './setup_menu.json',
-        ethernet: './ethernet_setup.json',
-        provisioning: './provisioning_setup.json',
-        settings: './network_settings.json',
-        clock: './clock_setup.json',
-        oat: './oat_setup.json',
-        tbd: './tbd_setup.json'
-    };
     if (!window._layoutTreeExpandedPages) window._layoutTreeExpandedPages = { [jsonPath]: true };
+    if (typeof window._layoutTreeExpandedTstatbody !== 'boolean') window._layoutTreeExpandedTstatbody = true;
     const pageNodes = buildPageNodes(data);
     const query = (searchInput?.value || '').trim().toLowerCase();
     const filteredNodes = !query ? pageNodes : pageNodes.filter((n) => n.text.toLowerCase().includes(query));
+    const allShellNodes = buildTstatShellTreeNodes();
+    const shellFolderRow = allShellNodes[0];
+    const shellChildNodes = allShellNodes.slice(1);
+    const shellFiltered =
+        !query ?
+            shellChildNodes
+        :   shellChildNodes.filter(
+                (n) => n.text.toLowerCase().includes(query) || 'tstatbody'.includes(query)
+            );
+    const shellExpanded =
+        query ? shellFiltered.length > 0 || 'tstatbody'.includes(query) : !!window._layoutTreeExpandedTstatbody;
+
+    const mountRow = (n) => {
+        const div = document.createElement('div');
+        const typeMods = getLayoutTreeNodeLayoutClasses(n);
+        div.className = `layout-tree-node${n.indent ? ' layout-tree-node--child' : ''}${typeMods ? ` ${typeMods}` : ''}`.trim();
+        div.dataset.layoutNodeId = n.id;
+        div.style.paddingLeft = `${8 + (n.indent || 0) * 16}px`;
+        const chevronSp = document.createElement('span');
+        chevronSp.className = 'layout-tree-node__chevron';
+        chevronSp.setAttribute('aria-hidden', 'true');
+        const icon = document.createElement('span');
+        icon.className = 'layout-tree-node__icon';
+        icon.innerHTML = n.icon;
+        const label = document.createElement('span');
+        label.className = 'layout-tree-node__label';
+        label.textContent = n.text;
+        if (n.childKind === 'widget') {
+            label.title = 'Double-click to rename in tree';
+            label.addEventListener('dblclick', (evt) => {
+                evt.preventDefault();
+                evt.stopPropagation();
+                cancelDebouncedSelectLayoutRender();
+                const widgetRef = n.widget;
+                if (!widgetRef) return;
+                label.contentEditable = 'true';
+                label.focus();
+                document.getSelection()?.selectAllChildren(label);
+                const commitRename = () => {
+                    label.contentEditable = 'false';
+                    const raw = label.innerText.trim();
+                    if (!raw) {
+                        delete widgetRef.treeName;
+                    } else {
+                        widgetRef.treeName = raw
+                            .replace(/^row\s*::\s*/i, '')
+                            .replace(/^label\s*::\s*/i, '')
+                            .replace(/^icon\s*::\s*/i, '')
+                            .trim();
+                    }
+                    rerender(jsonPath);
+                };
+                const cancelRename = () => {
+                    label.contentEditable = 'false';
+                    label.textContent = n.text;
+                };
+                const onKey = (kevt) => {
+                    if (kevt.key === 'Enter') {
+                        kevt.preventDefault();
+                        label.removeEventListener('keydown', onKey);
+                        commitRename();
+                    } else if (kevt.key === 'Escape') {
+                        kevt.preventDefault();
+                        label.removeEventListener('keydown', onKey);
+                        cancelRename();
+                    }
+                };
+                label.addEventListener('keydown', onKey);
+                label.addEventListener('blur', () => {
+                    label.removeEventListener('keydown', onKey);
+                    commitRename();
+                }, { once: true });
+            });
+        }
+        const status = document.createElement('span');
+        status.className = `layout-tree-node__status ${n.status === 'warn' ? 'is-warning' : 'is-event'}`;
+        div.appendChild(chevronSp);
+        div.appendChild(icon);
+        div.appendChild(label);
+        div.appendChild(status);
+        const treeDropIdx = parseWidgetIndexFromLayoutTreeNodeId(n.id);
+        const isDraggableWidgetRow = n.childKind === 'widget' && treeDropIdx >= 0;
+        if (isDraggableWidgetRow) {
+            div.draggable = true;
+            div.addEventListener('dragstart', (evt) => {
+                window._layoutTreeDragNodeId = n.id;
+                try {
+                    evt.dataTransfer.setData('text/plain', n.id);
+                    evt.dataTransfer.setData('application/x-tstat-tree-node', n.id);
+                } catch {
+                    /* ignore */
+                }
+                evt.dataTransfer.effectAllowed = 'move';
+                setTimeout(() => {
+                    div.style.opacity = '0.45';
+                }, 0);
+            });
+            div.addEventListener('dragend', () => {
+                div.style.opacity = '';
+                const ended = n.id;
+                setTimeout(() => {
+                    if (window._layoutTreeDragNodeId === ended) window._layoutTreeDragNodeId = null;
+                }, 0);
+            });
+        }
+        if (treeDropIdx >= 0) {
+            div.addEventListener('dragover', (evt) => {
+                const widgetsOv = window._currentScreenData?.widgets;
+                const toIdx = treeDropIdx;
+                if (toIdx < 0) return;
+                const toW = widgetsOv?.[toIdx];
+                const rect = div.getBoundingClientRect();
+                const y = evt.clientY - rect.top;
+                const inside = y > rect.height * 0.28 && y < rect.height * 0.72;
+
+                if (window._layoutPaletteDrag) {
+                    if (!widgetAcceptsChildren(toW) || !inside) return;
+                    evt.preventDefault();
+                    evt.dataTransfer.dropEffect = 'copy';
+                    content.querySelectorAll('.layout-tree-node--drop-line-top, .layout-tree-node--drop-line-bottom, .layout-tree-node--drop-inside')
+                        .forEach((el) => el.classList.remove('layout-tree-node--drop-line-top', 'layout-tree-node--drop-line-bottom', 'layout-tree-node--drop-inside'));
+                    div.classList.add('layout-tree-node--drop-inside');
+                    return;
+                }
+
+                const draggedId =
+                    window._layoutTreeDragNodeId ||
+                    (() => {
+                        try {
+                            return evt.dataTransfer.getData('application/x-tstat-tree-node') || evt.dataTransfer.getData('text/plain');
+                        } catch {
+                            return '';
+                        }
+                    })();
+                if (!draggedId) return;
+                const fromIdx = parseWidgetIndexFromLayoutTreeNodeId(draggedId);
+                if (fromIdx < 0 || toIdx < 0) return;
+                if (fromIdx === toIdx) return;
+                const fromW = widgetsOv?.[fromIdx];
+                if (inside && widgetAcceptsChildren(toW) && !isWidgetDescendantOf(widgetsOv, toIdx, fromIdx)) {
+                    evt.preventDefault();
+                    evt.dataTransfer.dropEffect = 'copy';
+                    content.querySelectorAll('.layout-tree-node--drop-line-top, .layout-tree-node--drop-line-bottom, .layout-tree-node--drop-inside')
+                        .forEach((el) => el.classList.remove('layout-tree-node--drop-line-top', 'layout-tree-node--drop-line-bottom', 'layout-tree-node--drop-inside'));
+                    div.classList.add('layout-tree-node--drop-inside');
+                    return;
+                }
+                if (!layoutDropTargetsSameHierarchy(fromW, toW)) return;
+                evt.preventDefault();
+                evt.dataTransfer.dropEffect = 'move';
+                const side = y < rect.height / 2 ? 'top' : 'bottom';
+                content.querySelectorAll('.layout-tree-node--drop-line-top, .layout-tree-node--drop-line-bottom, .layout-tree-node--drop-inside')
+                    .forEach((el) => el.classList.remove('layout-tree-node--drop-line-top', 'layout-tree-node--drop-line-bottom', 'layout-tree-node--drop-inside'));
+                div.classList.add(side === 'top' ? 'layout-tree-node--drop-line-top' : 'layout-tree-node--drop-line-bottom');
+            });
+            div.addEventListener('dragleave', () => {
+                div.classList.remove('layout-tree-node--drop-line-top', 'layout-tree-node--drop-line-bottom', 'layout-tree-node--drop-inside');
+            });
+            div.addEventListener('drop', (evt) => {
+                evt.preventDefault();
+                div.classList.remove('layout-tree-node--drop-line-top', 'layout-tree-node--drop-line-bottom', 'layout-tree-node--drop-inside');
+                const widgets = window._currentScreenData?.widgets;
+                if (!Array.isArray(widgets)) return;
+                const toIdx = treeDropIdx;
+                if (toIdx < 0) return;
+                const toWidget = widgets[toIdx];
+                const rect = div.getBoundingClientRect();
+                const y = evt.clientY - rect.top;
+                const inside = y > rect.height * 0.28 && y < rect.height * 0.72;
+
+                if (window._layoutPaletteDrag) {
+                    if (!inside || !widgetAcceptsChildren(toWidget)) return;
+                    const pal = window._layoutPaletteDrag;
+                    const id = `palette_${Date.now()}`;
+                    widgets.push({
+                        type: 'label',
+                        id,
+                        text: pal.svg || '',
+                        libraryIconId: pal.id,
+                        libraryIconName: pal.name || pal.id || 'Icon',
+                        x: 32,
+                        y: 48,
+                        width: Math.max(32, snapLcdCoordQuarter(40, window._currentScreenData)),
+                        align: 'left',
+                        parentId: toWidget.id,
+                        color: '#ffffff'
+                    });
+                    window._layoutPaletteDrag = null;
+                    normalizeWidgetTreeOrder(widgets);
+                    const newIdx = widgets.findIndex((w) => w && w.id === id);
+                    window._layoutSelectedNodeId = newIdx >= 0 ? `w-${newIdx}` : `w-${widgets.length - 1}`;
+                    window._layoutTreeDragNodeId = null;
+                    rerender(jsonPath);
+                    return;
+                }
+
+                let draggedId = window._layoutTreeDragNodeId;
+                if (!draggedId) {
+                    try {
+                        draggedId =
+                            evt.dataTransfer.getData('application/x-tstat-tree-node') || evt.dataTransfer.getData('text/plain');
+                    } catch {
+                        draggedId = '';
+                    }
+                }
+                if (!draggedId) return;
+                const fromIdx = parseWidgetIndexFromLayoutTreeNodeId(draggedId);
+                if (fromIdx < 0 || toIdx < 0 || fromIdx >= widgets.length || toIdx >= widgets.length) return;
+                if (fromIdx === toIdx) return;
+                const fromWidget = widgets[fromIdx];
+                if (inside && widgetAcceptsChildren(toWidget) && !isWidgetDescendantOf(widgets, toIdx, fromIdx)) {
+                    fromWidget.parentId = toWidget.id;
+                    normalizeWidgetTreeOrder(widgets);
+                    const ni = widgets.indexOf(fromWidget);
+                    window._layoutSelectedNodeId = ni >= 0 ? `w-${ni}` : n.id;
+                    window._layoutTreeDragNodeId = null;
+                    rerender(jsonPath);
+                    return;
+                }
+
+                if (!layoutDropTargetsSameHierarchy(fromWidget, toWidget)) return;
+                const fromIsRow = fromWidget?.type === 'menu_row' || fromWidget?.type === 'blank';
+                const toIsRow = toWidget?.type === 'menu_row' || toWidget?.type === 'blank';
+                const fromIsLabelLike = fromWidget?.type === 'label' || fromWidget?.type === 'header';
+                const toIsLabelLike = toWidget?.type === 'label' || toWidget?.type === 'header';
+                if (fromIsRow && toIsRow) {
+                    const aRow = normalizeLcdRowSlot(fromWidget.lcdRow);
+                    const bRow = normalizeLcdRowSlot(toWidget.lcdRow);
+                    fromWidget.lcdRow = bRow;
+                    toWidget.lcdRow = aRow;
+                } else if (fromIsLabelLike && toIsLabelLike) {
+                    fromWidget.parentId = toWidget.parentId;
+                    const ax = Number(fromWidget.x || 0);
+                    const ay = Number(fromWidget.y || 0);
+                    const bx = Number(toWidget.x || 0);
+                    const by = Number(toWidget.y || 0);
+                    fromWidget.x = bx;
+                    fromWidget.y = by;
+                    toWidget.x = ax;
+                    toWidget.y = ay;
+                } else {
+                    fromWidget.parentId = toWidget.parentId;
+                    const tmp = widgets[fromIdx];
+                    widgets[fromIdx] = widgets[toIdx];
+                    widgets[toIdx] = tmp;
+                    normalizeWidgetTreeOrder(widgets);
+                }
+                window._layoutSelectedNodeId = `w-${toIdx}`;
+                window._layoutTreeDragNodeId = null;
+                rerender(jsonPath);
+            });
+        }
+        div.addEventListener('click', () => {
+            if (typeof window._selectLayoutNode === 'function') {
+                window._selectLayoutNode(n.id);
+            } else {
+                window._layoutSelectedNodeId = n.id;
+                renderLayoutTreePanel(data, jsonPath, rerender);
+                renderLayoutPropertiesPanel(data, jsonPath, rerender);
+            }
+        });
+        div.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            if (typeof window._selectLayoutNode === 'function') window._selectLayoutNode(n.id);
+            openTreeContextMenu(e, n, jsonPath, rerender);
+        });
+        if (window._layoutSelectedNodeId === n.id) {
+            div.classList.add('layout-tree-node--selected');
+        }
+        return div;
+    };
+
+    const tstatFolder = document.createElement('div');
+    tstatFolder.className = 'layout-tree-folder';
+    const tstatRow = document.createElement('div');
+    tstatRow.className = 'layout-tree-node layout-tree-node--screen layout-tree-node--tstat-body-folder';
+    const tChev = document.createElement('span');
+    tChev.className = 'layout-tree-node__chevron';
+    tChev.setAttribute('aria-hidden', 'true');
+    tChev.textContent = shellExpanded ? '▼' : '▶';
+    const tIcon = document.createElement('span');
+    tIcon.className = 'layout-tree-node__icon layout-tree-node__icon--screen';
+    tIcon.innerHTML = shellFolderRow.icon;
+    const tLabel = document.createElement('span');
+    tLabel.className = 'layout-tree-node__label';
+    tLabel.textContent = shellFolderRow.text;
+    const tStat = document.createElement('span');
+    tStat.className = 'layout-tree-node__status';
+    tStat.textContent = 'shell';
+    tstatRow.appendChild(tChev);
+    tstatRow.appendChild(tIcon);
+    tstatRow.appendChild(tLabel);
+    tstatRow.appendChild(tStat);
+    tstatRow.addEventListener('click', () => {
+        if (!query) window._layoutTreeExpandedTstatbody = !window._layoutTreeExpandedTstatbody;
+        renderLayoutTreePanel(data, jsonPath, rerender);
+    });
+    tstatFolder.appendChild(tstatRow);
+    const tstatChildren = document.createElement('div');
+    tstatChildren.className = 'layout-tree-folder__children';
+    tstatChildren.style.display = shellExpanded ? '' : 'none';
+    if (!query || shellFiltered.length) {
+        (query ? shellFiltered : shellChildNodes).forEach((n) => tstatChildren.appendChild(mountRow(n)));
+    } else {
+        const sh = document.createElement('div');
+        sh.className = 'layout-tree-node layout-tree-node--child';
+        sh.style.paddingLeft = '24px';
+        sh.innerHTML =
+            '<span class="layout-tree-node__chevron" aria-hidden="true"></span><span class="layout-tree-node__icon">…</span><span class="layout-tree-node__label">No shell matches</span><span class="layout-tree-node__status"></span>';
+        tstatChildren.appendChild(sh);
+    }
+    tstatFolder.appendChild(tstatChildren);
+    content.appendChild(tstatFolder);
 
     screenNodes.forEach((s) => {
         const folder = document.createElement('div');
         folder.className = 'layout-tree-folder';
         const row = document.createElement('div');
-        const targetPath = pageToJsonPath[s.key];
+        const targetPath = ROUTE_TO_JSON_PATH[s.key];
         const isCurrent = targetPath === jsonPath;
         const expanded = !!window._layoutTreeExpandedPages[targetPath];
         row.className = `layout-tree-node layout-tree-node--screen${isCurrent ? ' layout-tree-node--screen-active' : ''}`;
@@ -1299,233 +2303,7 @@ function renderLayoutTreePanel(data, jsonPath, rerender) {
         children.className = 'layout-tree-folder__children';
         children.style.display = expanded ? '' : 'none';
         if (isCurrent) {
-            filteredNodes.forEach((n) => {
-                const div = document.createElement('div');
-                const typeMods = getLayoutTreeNodeLayoutClasses(n);
-                div.className = `layout-tree-node${n.indent ? ' layout-tree-node--child' : ''}${typeMods ? ` ${typeMods}` : ''}`.trim();
-                div.style.paddingLeft = `${8 + (n.indent || 0) * 16}px`;
-                const chevronSp = document.createElement('span');
-                chevronSp.className = 'layout-tree-node__chevron';
-                chevronSp.setAttribute('aria-hidden', 'true');
-                const icon = document.createElement('span');
-                icon.className = 'layout-tree-node__icon';
-                icon.innerHTML = n.icon;
-                const label = document.createElement('span');
-                label.className = 'layout-tree-node__label';
-                label.textContent = n.text;
-                if (n.childKind === 'widget') {
-                    label.title = 'Double-click to rename in tree';
-                    label.addEventListener('dblclick', (evt) => {
-                        evt.preventDefault();
-                        evt.stopPropagation();
-                        const widgetRef = n.widget;
-                        if (!widgetRef) return;
-                        label.contentEditable = 'true';
-                        label.focus();
-                        document.getSelection()?.selectAllChildren(label);
-                        const commitRename = () => {
-                            label.contentEditable = 'false';
-                            const raw = label.innerText.trim();
-                            if (!raw) {
-                                delete widgetRef.treeName;
-                            } else {
-                                widgetRef.treeName = raw
-                                    .replace(/^row\s*::\s*/i, '')
-                                    .replace(/^label\s*::\s*/i, '')
-                                    .replace(/^icon\s*::\s*/i, '')
-                                    .trim();
-                            }
-                            rerender(jsonPath);
-                        };
-                        const cancelRename = () => {
-                            label.contentEditable = 'false';
-                            label.textContent = n.text;
-                        };
-                        const onKey = (kevt) => {
-                            if (kevt.key === 'Enter') {
-                                kevt.preventDefault();
-                                label.removeEventListener('keydown', onKey);
-                                commitRename();
-                            } else if (kevt.key === 'Escape') {
-                                kevt.preventDefault();
-                                label.removeEventListener('keydown', onKey);
-                                cancelRename();
-                            }
-                        };
-                        label.addEventListener('keydown', onKey);
-                        label.addEventListener('blur', () => {
-                            label.removeEventListener('keydown', onKey);
-                            commitRename();
-                        }, { once: true });
-                    });
-                }
-                const status = document.createElement('span');
-                status.className = `layout-tree-node__status ${n.status === 'warn' ? 'is-warning' : 'is-event'}`;
-                div.appendChild(chevronSp);
-                div.appendChild(icon);
-                div.appendChild(label);
-                div.appendChild(status);
-                const parseWidgetIndexFromNodeId = (id) => {
-                    const m = String(id || '').match(/^w-(\d+)$/);
-                    return m ? Number(m[1]) : -1;
-                };
-                const isTopLevelWidgetNode = n.childKind === 'widget' && parseWidgetIndexFromNodeId(n.id) >= 0;
-                if (isTopLevelWidgetNode) {
-                    div.draggable = true;
-                    div.addEventListener('dragstart', (evt) => {
-                        window._layoutTreeDragNodeId = n.id;
-                        evt.dataTransfer.effectAllowed = 'move';
-                        setTimeout(() => { div.style.opacity = '0.45'; }, 0);
-                    });
-                    div.addEventListener('dragend', () => {
-                        div.style.opacity = '';
-                        window._layoutTreeDragNodeId = null;
-                    });
-                    div.addEventListener('dragover', (evt) => {
-                        const widgetsOv = window._currentScreenData?.widgets;
-                        const toIdx = parseWidgetIndexFromNodeId(n.id);
-                        if (toIdx < 0) return;
-                        const toW = widgetsOv?.[toIdx];
-                        const rect = div.getBoundingClientRect();
-                        const y = evt.clientY - rect.top;
-                        const inside = y > rect.height * 0.28 && y < rect.height * 0.72;
-
-                        if (window._layoutPaletteDrag) {
-                            if (!widgetAcceptsChildren(toW) || !inside) return;
-                            evt.preventDefault();
-                            evt.dataTransfer.dropEffect = 'copy';
-                            content.querySelectorAll('.layout-tree-node--drop-line-top, .layout-tree-node--drop-line-bottom, .layout-tree-node--drop-inside')
-                                .forEach((el) => el.classList.remove('layout-tree-node--drop-line-top', 'layout-tree-node--drop-line-bottom', 'layout-tree-node--drop-inside'));
-                            div.classList.add('layout-tree-node--drop-inside');
-                            return;
-                        }
-
-                        const draggedId = window._layoutTreeDragNodeId;
-                        if (!draggedId || draggedId === n.id) return;
-                        const fromIdx = parseWidgetIndexFromNodeId(draggedId);
-                        if (fromIdx < 0 || toIdx < 0) return;
-                        const fromW = widgetsOv?.[fromIdx];
-                        if (inside && widgetAcceptsChildren(toW) && !isWidgetDescendantOf(widgetsOv, toIdx, fromIdx)) {
-                            evt.preventDefault();
-                            evt.dataTransfer.dropEffect = 'copy';
-                            content.querySelectorAll('.layout-tree-node--drop-line-top, .layout-tree-node--drop-line-bottom, .layout-tree-node--drop-inside')
-                                .forEach((el) => el.classList.remove('layout-tree-node--drop-line-top', 'layout-tree-node--drop-line-bottom', 'layout-tree-node--drop-inside'));
-                            div.classList.add('layout-tree-node--drop-inside');
-                            return;
-                        }
-                        if (!layoutDropTargetsSameHierarchy(fromW, toW)) return;
-                        evt.preventDefault();
-                        evt.dataTransfer.dropEffect = 'move';
-                        const side = y < rect.height / 2 ? 'top' : 'bottom';
-                        content.querySelectorAll('.layout-tree-node--drop-line-top, .layout-tree-node--drop-line-bottom, .layout-tree-node--drop-inside')
-                            .forEach((el) => el.classList.remove('layout-tree-node--drop-line-top', 'layout-tree-node--drop-line-bottom', 'layout-tree-node--drop-inside'));
-                        div.classList.add(side === 'top' ? 'layout-tree-node--drop-line-top' : 'layout-tree-node--drop-line-bottom');
-                    });
-                    div.addEventListener('dragleave', () => {
-                        div.classList.remove('layout-tree-node--drop-line-top', 'layout-tree-node--drop-line-bottom', 'layout-tree-node--drop-inside');
-                    });
-                    div.addEventListener('drop', (evt) => {
-                        evt.preventDefault();
-                        div.classList.remove('layout-tree-node--drop-line-top', 'layout-tree-node--drop-line-bottom', 'layout-tree-node--drop-inside');
-                        const widgets = window._currentScreenData?.widgets;
-                        if (!Array.isArray(widgets)) return;
-                        const toIdx = parseWidgetIndexFromNodeId(n.id);
-                        if (toIdx < 0) return;
-                        const toWidget = widgets[toIdx];
-                        const rect = div.getBoundingClientRect();
-                        const y = evt.clientY - rect.top;
-                        const inside = y > rect.height * 0.28 && y < rect.height * 0.72;
-
-                        if (window._layoutPaletteDrag) {
-                            if (!inside || !widgetAcceptsChildren(toWidget)) return;
-                            const pal = window._layoutPaletteDrag;
-                            const id = `palette_${Date.now()}`;
-                            widgets.push({
-                                type: 'label',
-                                id,
-                                text: pal.svg || '',
-                                libraryIconId: pal.id,
-                                libraryIconName: pal.name || pal.id || 'Icon',
-                                x: 32,
-                                y: 48,
-                                width: Math.max(32, snapLcdCoordQuarter(40, window._currentScreenData)),
-                                align: 'left',
-                                parentId: toWidget.id,
-                                color: '#ffffff'
-                            });
-                            window._layoutPaletteDrag = null;
-                            normalizeWidgetTreeOrder(widgets);
-                            const newIdx = widgets.findIndex((w) => w && w.id === id);
-                            window._layoutSelectedNodeId = newIdx >= 0 ? `w-${newIdx}` : `w-${widgets.length - 1}`;
-                            rerender(jsonPath);
-                            return;
-                        }
-
-                        const draggedId = window._layoutTreeDragNodeId;
-                        if (!draggedId || draggedId === n.id) return;
-                        const fromIdx = parseWidgetIndexFromNodeId(draggedId);
-                        if (fromIdx < 0 || toIdx < 0 || fromIdx >= widgets.length || toIdx >= widgets.length) return;
-                        const fromWidget = widgets[fromIdx];
-                        if (inside && widgetAcceptsChildren(toWidget) && !isWidgetDescendantOf(widgets, toIdx, fromIdx)) {
-                            fromWidget.parentId = toWidget.id;
-                            normalizeWidgetTreeOrder(widgets);
-                            const ni = widgets.indexOf(fromWidget);
-                            window._layoutSelectedNodeId = ni >= 0 ? `w-${ni}` : n.id;
-                            rerender(jsonPath);
-                            return;
-                        }
-
-                        if (!layoutDropTargetsSameHierarchy(fromWidget, toWidget)) return;
-                        const fromIsRow = fromWidget?.type === 'menu_row' || fromWidget?.type === 'blank';
-                        const toIsRow = toWidget?.type === 'menu_row' || toWidget?.type === 'blank';
-                        const fromIsLabelLike = fromWidget?.type === 'label' || fromWidget?.type === 'header';
-                        const toIsLabelLike = toWidget?.type === 'label' || toWidget?.type === 'header';
-                        if (fromIsRow && toIsRow) {
-                            const aRow = normalizeLcdRowSlot(fromWidget.lcdRow);
-                            const bRow = normalizeLcdRowSlot(toWidget.lcdRow);
-                            fromWidget.lcdRow = bRow;
-                            toWidget.lcdRow = aRow;
-                        } else if (fromIsLabelLike && toIsLabelLike) {
-                            fromWidget.parentId = toWidget.parentId;
-                            const ax = Number(fromWidget.x || 0);
-                            const ay = Number(fromWidget.y || 0);
-                            const bx = Number(toWidget.x || 0);
-                            const by = Number(toWidget.y || 0);
-                            fromWidget.x = bx;
-                            fromWidget.y = by;
-                            toWidget.x = ax;
-                            toWidget.y = ay;
-                        } else {
-                            fromWidget.parentId = toWidget.parentId;
-                            const tmp = widgets[fromIdx];
-                            widgets[fromIdx] = widgets[toIdx];
-                            widgets[toIdx] = tmp;
-                            normalizeWidgetTreeOrder(widgets);
-                        }
-                        window._layoutSelectedNodeId = `w-${toIdx}`;
-                        rerender(jsonPath);
-                    });
-                }
-                div.addEventListener('click', () => {
-                    if (typeof window._selectLayoutNode === 'function') window._selectLayoutNode(n.id);
-                    else window._layoutSelectedNodeId = n.id;
-                    content.querySelectorAll('.layout-tree-node--selected').forEach((el) => el.classList.remove('layout-tree-node--selected'));
-                    div.classList.add('layout-tree-node--selected');
-                    div.classList.add('layout-tree-node--pulse');
-                    setTimeout(() => div.classList.remove('layout-tree-node--pulse'), 260);
-                    div.scrollIntoView({ block: 'nearest' });
-                    renderLayoutPropertiesPanel(data, jsonPath, rerender);
-                });
-                div.addEventListener('contextmenu', (e) => {
-                    e.preventDefault();
-                    if (typeof window._selectLayoutNode === 'function') window._selectLayoutNode(n.id);
-                    openTreeContextMenu(e, n, jsonPath, rerender);
-                });
-                if (window._layoutSelectedNodeId === n.id) {
-                    div.classList.add('layout-tree-node--selected');
-                }
-                children.appendChild(div);
-            });
+            filteredNodes.forEach((n) => children.appendChild(mountRow(n)));
         } else {
             const hint = document.createElement('div');
             hint.className = 'layout-tree-node layout-tree-node--child';
@@ -1544,29 +2322,40 @@ function renderLayoutTreePanel(data, jsonPath, rerender) {
     const ensureIconPaletteUi = () => {
         const host = document.getElementById('layout-icon-palette-host');
         if (!host) return;
+        const assetsShell = `
+                <div class="layout-sl-assets__toolbar">
+                    <label class="layout-tree-panel__search layout-sl-assets__search">
+                        <span class="layout-tree-panel__search-icon" aria-hidden="true">
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7 12A5 5 0 1 0 7 2a5 5 0 0 0 0 10Zm0-1.2A3.8 3.8 0 1 1 7 3.2a3.8 3.8 0 0 1 0 7.6Z" fill="currentColor" opacity=".55"/><path d="m10.9 11.1 3.5 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity=".55"/></svg>
+                        </span>
+                        <input id="layout-assets-filter" type="search" placeholder="Filter images…" autocomplete="off" />
+                    </label>
+                    <div class="layout-sl-assets__toolbar-actions">
+                        <button type="button" id="icon-palette-import">Add file…</button>
+                    </div>
+                </div>
+                <p class="layout-sl-assets__hint">Images list (SquareLine-style). Project folder: <code>lcd-lib/icons</code>. Other folder: set <code>TSTAT_LCD_LIB</code> when starting <code>npm start</code>.</p>
+                <div id="layout-sl-asset-list" class="layout-sl-asset-list" role="list"></div>
+                <input id="icon-palette-file" type="file" accept=".svg,image/svg+xml" style="display:none" />
+        `;
         let palette = document.getElementById('layout-icon-palette');
         if (!palette) {
             palette = document.createElement('div');
             palette.id = 'layout-icon-palette';
-            palette.className = 'layout-icon-palette';
-            palette.innerHTML = `
-                <div class="layout-icon-palette__head">
-                    <span>Presets</span>
-                    <div class="layout-icon-palette__head-actions">
-                        <button type="button" id="icon-palette-import">Import SVG</button>
-                    </div>
-                </div>
-                <input id="icon-palette-file" type="file" accept=".svg,image/svg+xml" style="display:none" />
-                <div id="layout-icon-palette-grid" class="layout-icon-palette__grid"></div>
-            `;
+            palette.className = 'layout-sl-assets';
+            palette.innerHTML = assetsShell;
             host.appendChild(palette);
         } else if (palette.parentNode !== host) {
             host.appendChild(palette);
         }
-        const grid = document.getElementById('layout-icon-palette-grid');
+        if (!palette.querySelector('#layout-sl-asset-list')) {
+            palette.className = 'layout-sl-assets';
+            palette.innerHTML = assetsShell;
+        }
+        const list = document.getElementById('layout-sl-asset-list');
         const importBtn = document.getElementById('icon-palette-import');
         const fileInput = document.getElementById('icon-palette-file');
-        if (!grid || !importBtn || !fileInput) return;
+        if (!list || !importBtn || !fileInput) return;
 
         // SquareLine-style preset symbols: use currentColor so tiles (light/dark) and LCD (widget.color) both work.
         const presets = [
@@ -1615,36 +2404,62 @@ function renderLayoutTreePanel(data, jsonPath, rerender) {
             { id: 'vent', name: 'Vent', svg: '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 8h16M4 12h12M4 16h16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M18 10l2 2-2 2M18 14l2 2-2 2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>' }
         ];
         const custom = loadCustomPaletteSvgs().map((item, idx) => ({ id: `custom-${idx}`, name: item.name, svg: item.svg, custom: true }));
-        const all = [...presets, ...custom];
+        const diskRaw = getLcdLibDiskSync();
+        const disk = Array.isArray(diskRaw) ? diskRaw : [];
+        const initialDiskSig = disk.map((x) => x.id).join('\n');
         if (!window._selectedPaletteIcon || !window._selectedPaletteIcon.svg) window._selectedPaletteIcon = { id: presets[0].id, name: presets[0].name, svg: presets[0].svg };
 
-        grid.innerHTML = '';
-        all.forEach((item) => {
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'layout-icon-palette__item';
-            if (window._selectedPaletteIcon?.svg === item.svg) btn.classList.add('is-selected');
-            btn.innerHTML = `<span class="layout-icon-palette__preview">${item.svg}</span><span class="layout-icon-palette__label">${item.name || (item.custom ? 'Custom' : item.id)}</span>`;
-            btn.draggable = true;
-            btn.title = (btn.title || '') + ' Drag onto the LCD or into Hierarchy (center on a group to parent).';
-            btn.addEventListener('dragstart', (e) => {
+        const assetMatches = (item, q) => {
+            if (!q) return true;
+            const blob = `${item.id} ${item.name || ''} ${item.custom ? 'imported' : ''} ${item.fromLib ? 'library' : 'built-in'}`.toLowerCase();
+            return blob.includes(q);
+        };
+
+        const drawRow = (item) => {
+            const row = document.createElement('div');
+            row.className = 'layout-sl-asset-row';
+            row.setAttribute('role', 'listitem');
+            row.draggable = true;
+            const sel = window._selectedPaletteIcon;
+            if (sel && (String(sel.id) === String(item.id) || sel.svg === item.svg)) row.classList.add('is-selected');
+
+            const thumb = document.createElement('div');
+            thumb.className = 'layout-sl-asset-row__thumb';
+            thumb.innerHTML = item.svg;
+
+            const meta = document.createElement('div');
+            meta.className = 'layout-sl-asset-row__meta';
+            const nameEl = document.createElement('div');
+            nameEl.className = 'layout-sl-asset-row__name';
+            nameEl.textContent = item.name || item.id;
+            const src = document.createElement('div');
+            src.className = 'layout-sl-asset-row__src';
+            src.textContent = item.custom ? 'Imported' : item.fromLib ? 'Library' : 'Built-in';
+            meta.append(nameEl, src);
+            row.append(thumb, meta);
+
+            row.title =
+                'Click to select for the Icon widget · drag onto LCD or hierarchy · right-click imported row to remove';
+            row.addEventListener('dragstart', (e) => {
                 window._layoutPaletteDrag = { svg: item.svg, name: item.name || item.id, id: item.id };
                 try {
                     e.dataTransfer.setData('text/plain', 'palette-icon');
                     e.dataTransfer.effectAllowed = 'copy';
-                } catch (_) {}
-                setTimeout(() => { btn.style.opacity = '0.5'; }, 0);
+                } catch {
+                    /* ignore */
+                }
+                row.classList.add('layout-sl-asset-row--dragging');
             });
-            btn.addEventListener('dragend', () => {
-                btn.style.opacity = '';
+            row.addEventListener('dragend', () => {
+                row.classList.remove('layout-sl-asset-row--dragging');
                 window._layoutPaletteDrag = null;
             });
-            btn.addEventListener('click', () => {
+            row.addEventListener('click', () => {
                 window._selectedPaletteIcon = { id: item.id, name: item.name || item.id, svg: item.svg };
                 renderLayoutTreePanel(data, jsonPath, rerender);
             });
             if (item.custom) {
-                btn.addEventListener('contextmenu', (evt) => {
+                row.addEventListener('contextmenu', (evt) => {
                     evt.preventDefault();
                     const now = loadCustomPaletteSvgs();
                     const next = now.filter((s) => s.svg !== item.svg);
@@ -1655,8 +2470,51 @@ function renderLayoutTreePanel(data, jsonPath, rerender) {
                     renderLayoutTreePanel(data, jsonPath, rerender);
                 });
             }
-            grid.appendChild(btn);
-        });
+            list.appendChild(row);
+        };
+
+        const repaintAssetList = () => {
+            list.innerHTML = '';
+            const filtEl = document.getElementById('layout-assets-filter');
+            const q = (filtEl?.value || '').trim().toLowerCase();
+            const presetsF = presets.filter((it) => assetMatches(it, q));
+            const diskF = disk.filter((it) => assetMatches(it, q));
+            const customF = custom.filter((it) => assetMatches(it, q));
+            const appendSection = (title) => {
+                const h = document.createElement('div');
+                h.className = 'layout-sl-assets-section-title';
+                h.textContent = title;
+                list.appendChild(h);
+            };
+            if (presetsF.length) {
+                appendSection('Built-in symbols');
+                presetsF.forEach(drawRow);
+            }
+            if (diskF.length) {
+                appendSection('Library (lcd-lib/icons)');
+                diskF.forEach(drawRow);
+            }
+            if (customF.length) {
+                appendSection('Imported (this browser)');
+                customF.forEach(drawRow);
+            }
+            if (!presetsF.length && !diskF.length && !customF.length) {
+                const empty = document.createElement('div');
+                empty.className = 'layout-sl-assets-empty';
+                empty.textContent = q
+                    ? 'No images match the filter.'
+                    : 'No images yet — add SVG files to lcd-lib/icons or use Add file…';
+                list.appendChild(empty);
+            }
+        };
+
+        repaintAssetList();
+
+        const filtEl = document.getElementById('layout-assets-filter');
+        if (filtEl && !filtEl._assetsFilterBound) {
+            filtEl.addEventListener('input', repaintAssetList);
+            filtEl._assetsFilterBound = true;
+        }
 
         if (!importBtn._boundPaletteImport) {
             importBtn.addEventListener('click', () => fileInput.click());
@@ -1675,6 +2533,14 @@ function renderLayoutTreePanel(data, jsonPath, rerender) {
             });
             importBtn._boundPaletteImport = true;
         }
+
+        ensureLcdLibDiskCache().then(() => {
+            const d2 = getLcdLibDiskSync();
+            if (!Array.isArray(d2)) return;
+            const sig = d2.map((x) => x.id).join('\n');
+            if (sig === initialDiskSig) return;
+            renderLayoutTreePanel(data, jsonPath, rerender);
+        });
     };
     ensureIconPaletteUi();
     const factories = {
@@ -1749,6 +2615,214 @@ function renderLayoutPropertiesPanel(data, jsonPath, rerender) {
     const selected = nodes.find((n) => n.id === window._layoutSelectedNodeId);
     if (!selected) {
         content.innerHTML = '<div>Select an item in the tree to edit properties.</div>';
+        return;
+    }
+    if (selected.childKind === 'lcd_outline') {
+        content.innerHTML = '';
+        const title = document.createElement('div');
+        title.style.marginBottom = '10px';
+        title.style.fontWeight = '700';
+        title.textContent = 'LCD outline (workbench)';
+        content.appendChild(title);
+        const hint = document.createElement('p');
+        hint.style.margin = '0 0 12px';
+        hint.style.color = '#475569';
+        hint.style.fontSize = '12px';
+        hint.style.lineHeight = '1.45';
+        hint.textContent =
+            'Drag the highlighted edge strips on the device to move the LCD in the shell. Alt+arrow keys still nudge; Fit resets pan, zoom, and this offset.';
+        content.appendChild(hint);
+        const sec = document.createElement('div');
+        sec.className = 'layout-props-section';
+        const h = document.createElement('div');
+        h.className = 'layout-props-section__title';
+        h.textContent = 'Workbench offset (px)';
+        sec.appendChild(h);
+        const rowX = document.createElement('div');
+        rowX.className = 'layout-props-row';
+        const labX = document.createElement('label');
+        labX.textContent = 'nudge X';
+        const inX = document.createElement('input');
+        inX.type = 'number';
+        inX.id = 'layout-lcd-nudge-x';
+        inX.value = String(Math.round(Number(window._tstatLcdNudgeX) || 0));
+        rowX.appendChild(labX);
+        rowX.appendChild(inX);
+        sec.appendChild(rowX);
+        const rowY = document.createElement('div');
+        rowY.className = 'layout-props-row';
+        const labY = document.createElement('label');
+        labY.textContent = 'nudge Y';
+        const inY = document.createElement('input');
+        inY.type = 'number';
+        inY.id = 'layout-lcd-nudge-y';
+        inY.value = String(Math.round(Number(window._tstatLcdNudgeY) || 0));
+        rowY.appendChild(labY);
+        rowY.appendChild(inY);
+        sec.appendChild(rowY);
+        content.appendChild(sec);
+        const actions = document.createElement('div');
+        actions.className = 'layout-props-actions';
+        const apply = document.createElement('button');
+        apply.textContent = 'Apply';
+        apply.onclick = () => {
+            const nx = Math.round(Number(inX.value) || 0);
+            const ny = Math.round(Number(inY.value) || 0);
+            window._tstatLcdNudgeX = nx;
+            window._tstatLcdNudgeY = ny;
+            const d = window._currentScreenData;
+            if (d) {
+                if (!d.canvasProfile) d.canvasProfile = {};
+                d.canvasProfile.previewOffsetX = nx;
+                d.canvasProfile.previewOffsetY = ny;
+            }
+            window._persistTstatLcdNudge?.();
+            window._applyTstatLcdNudgeTransform?.();
+            window._syncTstatLcdEdgeDragLayer?.();
+            rerender(jsonPath);
+        };
+        const reset = document.createElement('button');
+        reset.textContent = 'Reset offset';
+        reset.onclick = () => {
+            inX.value = '0';
+            inY.value = '0';
+            apply.click();
+        };
+        actions.appendChild(apply);
+        actions.appendChild(reset);
+        content.appendChild(actions);
+        return;
+    }
+    if (selected.childKind === 'shell_hw_group') {
+        content.innerHTML = '';
+        const title = document.createElement('div');
+        title.style.marginBottom = '10px';
+        title.style.fontWeight = '700';
+        title.textContent = 'Hardware buttons (simulated)';
+        content.appendChild(title);
+        const p = document.createElement('p');
+        p.style.margin = '0';
+        p.style.color = '#475569';
+        p.style.fontSize = '12px';
+        p.style.lineHeight = '1.5';
+        p.textContent =
+            'The four on-device keys sit on the device chrome (not the LCD JSON). They dispatch the same arrow-key events as the real product. Select each key under this group in the tree to highlight it on the canvas.';
+        content.appendChild(p);
+        return;
+    }
+    if (selected.childKind === 'shell_hw_button') {
+        content.innerHTML = '';
+        const title = document.createElement('div');
+        title.style.marginBottom = '10px';
+        title.style.fontWeight = '700';
+        title.textContent = selected.text;
+        content.appendChild(title);
+        const p = document.createElement('p');
+        p.style.margin = '0';
+        p.style.color = '#475569';
+        p.style.fontSize = '12px';
+        p.style.lineHeight = '1.5';
+        p.textContent =
+            'Simulated hardware control. In layout edit mode you can click the key on the device to select it; the button still sends navigation keys to the UI.';
+        content.appendChild(p);
+        return;
+    }
+    if (selected.childKind === 'shell_ref_photo') {
+        content.innerHTML = '';
+        const title = document.createElement('div');
+        title.style.marginBottom = '10px';
+        title.style.fontWeight = '700';
+        title.textContent = 'Thermostat reference image';
+        content.appendChild(title);
+        const hint = document.createElement('p');
+        hint.style.margin = '0 0 12px';
+        hint.style.color = '#475569';
+        hint.style.fontSize = '12px';
+        hint.style.lineHeight = '1.45';
+        hint.textContent =
+            'Full-device overlay (#ref-photo) for aligning the LCD to a photo. When visible, click the image in edit mode to select it. Settings persist in this browser (localStorage).';
+        content.appendChild(hint);
+        const img = document.getElementById('ref-photo');
+        const sec = document.createElement('div');
+        sec.className = 'layout-props-section';
+        const h = document.createElement('div');
+        h.className = 'layout-props-section__title';
+        h.textContent = 'Overlay';
+        sec.appendChild(h);
+        const rowVis = document.createElement('div');
+        rowVis.className = 'layout-props-row';
+        const labVis = document.createElement('label');
+        labVis.textContent = 'Visible';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.id = 'shell-ref-visible';
+        cb.checked = img ? img.style.display !== 'none' : false;
+        rowVis.appendChild(labVis);
+        rowVis.appendChild(cb);
+        sec.appendChild(rowVis);
+        const rowOp = document.createElement('div');
+        rowOp.className = 'layout-props-row';
+        const labOp = document.createElement('label');
+        labOp.textContent = 'Opacity';
+        const inOp = document.createElement('input');
+        inOp.type = 'number';
+        inOp.min = '0';
+        inOp.max = '1';
+        inOp.step = '0.05';
+        inOp.id = 'shell-ref-opacity';
+        const op = img ? parseFloat(img.style.opacity) : NaN;
+        inOp.value = String(Number.isFinite(op) ? op : 0.5);
+        rowOp.appendChild(labOp);
+        rowOp.appendChild(inOp);
+        sec.appendChild(rowOp);
+        const rowSrc = document.createElement('div');
+        rowSrc.className = 'layout-props-row layout-props-row--stack';
+        rowSrc.style.flexDirection = 'column';
+        rowSrc.style.alignItems = 'stretch';
+        const labSrc = document.createElement('label');
+        labSrc.textContent = 'Image src (URL or data URI)';
+        const ta = document.createElement('textarea');
+        ta.id = 'shell-ref-src';
+        ta.rows = 4;
+        ta.style.width = '100%';
+        ta.style.fontFamily = 'ui-monospace, Consolas, monospace';
+        ta.style.fontSize = '11px';
+        ta.value = img?.src || '';
+        rowSrc.appendChild(labSrc);
+        rowSrc.appendChild(ta);
+        sec.appendChild(rowSrc);
+        content.appendChild(sec);
+        const actions = document.createElement('div');
+        actions.className = 'layout-props-actions';
+        const apply = document.createElement('button');
+        apply.textContent = 'Apply';
+        apply.onclick = () => {
+            const el = document.getElementById('ref-photo');
+            if (!el) return;
+            const vis = cb.checked;
+            const o = Math.min(1, Math.max(0, Number(inOp.value) || 0));
+            const src = String(ta.value || '').trim();
+            el.style.opacity = String(o);
+            if (src) el.src = src;
+            if (vis) {
+                el.style.display = 'block';
+                el.classList.add('ref-photo--visible');
+            } else {
+                el.style.display = 'none';
+                el.classList.remove('ref-photo--visible');
+            }
+            if (typeof window._persistShellRefPhoto === 'function') window._persistShellRefPhoto();
+            applySelectionOutline();
+        };
+        const hide = document.createElement('button');
+        hide.textContent = 'Hide';
+        hide.onclick = () => {
+            cb.checked = false;
+            apply.click();
+        };
+        actions.appendChild(apply);
+        actions.appendChild(hide);
+        content.appendChild(actions);
         return;
     }
     const widget = selected.widget;
@@ -1935,8 +3009,19 @@ function renderLayoutPropertiesPanel(data, jsonPath, rerender) {
     testBtn.onclick = () => {
         const steps = [];
         try {
-            const lock = document.getElementById('thermostat-lock-toggle');
-            if (lock) { lock.click(); steps.push('lock-toggle'); }
+            if (!window._isVisualEditMode) {
+                const shell = document.getElementById('thermostat-shell-lock-btn');
+                if (shell && !shell.classList.contains('thermostat-shell-lock-btn--hidden')) {
+                    shell.click();
+                    steps.push('bezel-lock');
+                } else {
+                    const lb = document.getElementById('btn-lock-save');
+                    if (lb) {
+                        lb.click();
+                        steps.push('btn-lock-save');
+                    }
+                }
+            }
             const treeNode = document.querySelector('.layout-tree-node:not(.layout-tree-node--screen)');
             if (treeNode) { treeNode.dispatchEvent(new MouseEvent('click', { bubbles: true })); steps.push('tree-select'); }
             const nextBtn = document.getElementById('btn_next');
@@ -1969,14 +3054,15 @@ function renderLayoutPropertiesPanel(data, jsonPath, rerender) {
             await wait(120);
             if (window._currentScreenData?.page !== 'WIFI_SETTINGS') throw new Error('not on WIFI_SETTINGS');
             log.push('wifi');
-            // 4) Enter edit mode
+            // 4) Enter edit mode (bezel lock or panel Edit — Widgets panel is hidden until edit)
             if (!window._isVisualEditMode) {
-                const lock = document.getElementById('thermostat-lock-toggle');
-                if (lock) lock.click();
+                const shell = document.getElementById('thermostat-shell-lock-btn');
+                if (shell && !shell.classList.contains('thermostat-shell-lock-btn--hidden')) shell.click();
+                else document.getElementById('btn-lock-save')?.click();
             }
             await wait(150);
             if (!window._isVisualEditMode) throw new Error('edit mode not enabled');
-            log.push('unlock');
+            log.push('edit-on');
             // 5) Adjust width field
             const before = Number((window._currentScreenData.widgets || []).find((w) => w.id === 'ui_item_dhcp')?.valueWidth || 0);
             window._layoutSelectedNodeId = (() => {
@@ -1995,11 +3081,11 @@ function renderLayoutPropertiesPanel(data, jsonPath, rerender) {
             const after = Number((window._currentScreenData.widgets || []).find((w) => w.id === 'ui_item_dhcp')?.valueWidth || 0);
             if (after === before) throw new Error('valueWidth did not change');
             log.push('resize');
-            // 6) Lock/save
-            const lock = document.getElementById('thermostat-lock-toggle');
-            if (lock && window._isVisualEditMode) lock.click();
+            // 6) Run / save (exit edit)
+            const runBtn = document.getElementById('sls-run-preview-btn');
+            if (runBtn && window._isVisualEditMode) runBtn.click();
             await wait(200);
-            if (window._isVisualEditMode) throw new Error('lock/save did not complete');
+            if (window._isVisualEditMode) throw new Error('run/save did not complete');
             log.push('save');
             console.log(`[Scenario] PASS: ${log.join(' -> ')}`);
         } catch (err) {
@@ -2010,11 +3096,23 @@ function renderLayoutPropertiesPanel(data, jsonPath, rerender) {
     content.appendChild(actions);
 }
 
+/** Clears pending selection→full `renderScreen` (see `selectLayoutNode` inside `renderScreen`). */
+function cancelDebouncedSelectLayoutRender() {
+    if (window._layoutSelectRenderDebounceTimer) {
+        clearTimeout(window._layoutSelectRenderDebounceTimer);
+        window._layoutSelectRenderDebounceTimer = null;
+    }
+}
+
 function applySelectionOutline() {
     document.querySelectorAll('.layout-selected-el').forEach((el) => el.classList.remove('layout-selected-el'));
     const selectedId = window._layoutSelectedNodeId;
     if (!selectedId) return;
-    let target = document.querySelector(`[data-tree-node-id="${selectedId}"]`);
+    let target = null;
+    if (selectedId === 'lcd-outline') {
+        target = document.getElementById('tstat-lcd-edge-layer') || document.getElementById('tstat-lcd-container');
+    }
+    if (!target) target = document.querySelector(`[data-tree-node-id="${selectedId}"]`);
     if (!target && selectedId.includes('-icon-')) {
         const parentId = selectedId.split('-').slice(0, 2).join('-');
         const iconKey = selectedId.split('-icon-')[1];
@@ -2032,6 +3130,8 @@ function applySelectionOutline() {
         setTimeout(() => target.classList.remove('layout-selected-pulse'), 260);
     }
 }
+
+window._cancelDebouncedSelectLayoutRender = cancelDebouncedSelectLayoutRender;
 
 function setupMainTickerSimulation(data) {
     if (!data || data.page !== 'MAIN_DISPLAY') {
@@ -2116,17 +3216,7 @@ function setupMainTickerSimulation(data) {
 
 // Central navigation function
 window.navigateTo = function(screenName) {
-    const screenMap = {
-        'main': './main_display.json',
-        'setup': './setup_menu.json',
-        'settings': './network_settings.json',
-        'ethernet': './ethernet_setup.json',
-        'provisioning': './provisioning_setup.json',
-        'clock': './clock_setup.json',
-        'oat': './oat_setup.json',
-        'tbd': './tbd_setup.json'
-    };
-    const jsonPath = screenMap[screenName];
+    const jsonPath = ROUTE_TO_JSON_PATH[screenName];
     if (jsonPath) {
         saveLastScreenPath(jsonPath);
         // Restore per-screen focus state when returning to this screen.
@@ -2147,6 +3237,9 @@ window.navigateTo = function(screenName) {
 
 function syncVisualEditShellClass() {
     document.body.classList.toggle('visual-edit-shell', !!window._isVisualEditMode);
+    if (typeof window._applyTstatViewTransform === 'function') {
+        queueMicrotask(() => window._applyTstatViewTransform());
+    }
 }
 
 /** Debug UI lives inside #layout-props-panel; visibility follows layout edit. */
@@ -2157,7 +3250,7 @@ function syncDebugEventPanelVisibility() {
 const TSTAT_SKIP_SAVE_SERVER_KEY = 'tstat_skip_optional_save_server_v1';
 
 /**
- * Optional: POST JSON to save-server.js on port 5001 so edits write to disk.
+ * Optional: POST JSON to save-server (see `npm run save-server`) on port 5001 so edits write to disk.
  * If nothing listens, the browser logs one failed network request; we then skip further tries for this tab session to avoid spam.
  * Data is always persisted via saveScreenToCache (localStorage) regardless.
  */
@@ -2180,7 +3273,7 @@ function postToOptionalLocalSaveServer(activeJsonPath, jsonString) {
                 /* ignore */
             }
             console.debug(
-                '[Visual Edit] Optional disk save (localhost:5001) unavailable — edits remain in browser localStorage. Run `node save-server.js` to write JSON files.',
+                '[Visual Edit] Optional disk save (localhost:5001) unavailable — edits remain in browser localStorage. Run `npm run save-server` to write JSON files.',
                 { file: targetFile }
             );
         });
@@ -2202,14 +3295,15 @@ function syncLayoutEditPanelsShellVisibility() {
     if (widgets) widgets.classList.toggle('debug-ui-hidden', !isEdit);
     if (tree) tree.classList.toggle('debug-ui-hidden', !isEdit);
     if (props) props.classList.toggle('debug-ui-hidden', !isEdit);
+    if (typeof window._syncTstatLcdEdgeDragLayer === 'function') window._syncTstatLcdEdgeDragLayer();
 }
 
 /**
  * Tstat10-only: toggle runtime vs visual layout edit (not in SquareLine).
- * Shared by the bezel lock, debug panel button, and top bar control — do not rely on .click() delegation.
+ * Shared by the bezel lock/play control, Widgets panel Edit, top bar Run (play), and debug tools — do not rely on .click() delegation.
  */
 function runVisualEditLockToggle() {
-    const activeJsonPath = window._currentJsonPath || './main_display.json';
+    const activeJsonPath = window._currentJsonPath || DEFAULT_STARTUP_JSON_PATH;
     window._isVisualEditMode = !window._isVisualEditMode;
     syncVisualEditShellClass();
     const gridToggle = document.getElementById('toggle-grid-layer');
@@ -2248,6 +3342,7 @@ function runVisualEditLockToggle() {
             }
         }
         const jsonString = JSON.stringify(window._currentScreenData, null, 2);
+        syncWorkbenchNudgeIntoScreenDataForCache(window._currentScreenData);
         saveScreenToCache(activeJsonPath, window._currentScreenData);
         if (window.chrome && window.chrome.webview) {
             window.chrome.webview.postMessage({ action: 'save_settings', data: window._currentScreenData });
@@ -2271,7 +3366,7 @@ function bindGlobalVisualEditLockControlsOnce() {
         const t =
             el &&
             el.closest &&
-            el.closest('#thermostat-lock-toggle, #sls-edit-lock-toggle, #btn-lock-save, #phone-send-creds-btn');
+            el.closest('#sls-run-preview-btn, #btn-lock-save, #thermostat-shell-lock-btn');
         if (!t) return;
         e.preventDefault();
         e.stopPropagation();
@@ -2295,6 +3390,7 @@ function getProvisioningRssiPresentation(statusValue) {
     return table[s] || table.Ready;
 }
 
+/** Insert defaults from legacy 320×480 sim; `ensureProvisioningSetupHasRssi` scales to current canvas. */
 const PROV_RSSI_ICON_WIDGET = {
     type: 'label',
     id: 'prov_rssi_icon',
@@ -2333,6 +3429,10 @@ const PROV_RSSI_QUALITY_ROW_WIDGET = {
 function ensureProvisioningSetupHasRssi(data) {
     if (data?.page !== 'PROVISIONING_SETUP' || !Array.isArray(data.widgets)) return;
     const widgets = data.widgets;
+    const cw = canvasLogicalWidthPx(data);
+    const ch = canvasLogicalHeightPx(data);
+    const sx = cw / TSTAT10_LEGACY_DEVKIT_LCD_W;
+    const sy = ch / TSTAT10_LEGACY_DEVKIT_LCD_H;
     const headerIdx = widgets.findIndex((x) => x && x.type === 'header');
 
     if (!widgets.some((x) => x && x.id === 'prov_rssi_icon')) {
@@ -2360,33 +3460,41 @@ function ensureProvisioningSetupHasRssi(data) {
     if (pass) {
         pass.lcdRow = 4;
         if (String(pass.label || '') === 'Password') pass.label = 'Pass';
-        if (Number(pass.labelWidth) > 80) {
-            pass.labelWidth = 52;
-            pass.valueWidth = 248;
+        if (Number(pass.labelWidth) > Math.round(80 * sx)) {
+            pass.labelWidth = Math.round(52 * sx);
+            pass.valueWidth = Math.round(248 * sx);
         }
     }
     if (st) st.lcdRow = 5;
     if (rssi) {
         rssi.lcdRow = 6;
-        /* Do not overwrite labelWidth/valueWidth here — that blocked layout-editor resizes and forced a too-narrow RSSI box. */
-        if (Number(rssi.valueWidth) === 118 && Number(rssi.labelWidth) === 44) {
-            rssi.labelWidth = 52;
-            rssi.valueWidth = 248;
+        /* Heal stale narrow template; scale legacy 52/248 to current canvas without clobbering custom inspector widths. */
+        if (nearIntPx(rssi.valueWidth, 118) && nearIntPx(rssi.labelWidth, 44)) {
+            rssi.labelWidth = Math.round(52 * sx);
+            rssi.valueWidth = Math.round(248 * sx);
+        } else if (nearIntPx(rssi.labelWidth, 52) && nearIntPx(rssi.valueWidth, 248)) {
+            rssi.labelWidth = Math.round(52 * sx);
+            rssi.valueWidth = Math.round(248 * sx);
         }
     }
     if (qual) {
         qual.lcdRow = 7;
-        /* Keep qualitative row positions only; preserve user widths from the inspector. */
+        if (nearIntPx(qual.labelWidth, 56) && nearIntPx(qual.valueWidth, 244)) {
+            qual.labelWidth = Math.round(56 * sx);
+            qual.valueWidth = Math.round(244 * sx);
+        }
     }
     if (icon) {
-        icon.y = 8;
-        icon.width = 36;
+        const iw = Math.max(20, Math.round(36 * sx));
+        icon.width = iw;
+        icon.y = Math.max(4, Math.round(8 * sy));
+        icon.x = Math.max(0, Math.round(cw - iw - 4 * sx));
     }
 
     const c = widgets.find((x) => x && x.id === 'btn_connect_phone');
     const b = widgets.find((x) => x && x.id === 'btn_back');
-    if (c) c.y = 352;
-    if (b) b.y = 408;
+    if (c) c.y = Math.round(352 * sy);
+    if (b) b.y = Math.round(408 * sy);
 }
 
 function shouldProvSimulateFailure() {
@@ -2407,7 +3515,7 @@ function clearProvisioningFlowTimers() {
 
 /** After Requesting: apply password from phone app (simulated); then Success → WiFi connected. */
 function runProvisioningSuccessExchange(jsonPath) {
-    const path = jsonPath || window._currentJsonPath || './provisioning_setup.json';
+    const path = jsonPath || window._currentJsonPath || ROUTE_TO_JSON_PATH.provisioning;
     const data = window._currentScreenData;
     if (!data?.widgets) return;
     if (data.page !== 'PROVISIONING_SETUP' && !String(path).includes('provisioning_setup')) return;
@@ -2434,7 +3542,7 @@ function runProvisioningSuccessExchange(jsonPath) {
 }
 
 function startProvisioningConnectFlow(jsonPath) {
-    const path = jsonPath || window._currentJsonPath || './provisioning_setup.json';
+    const path = jsonPath || window._currentJsonPath || ROUTE_TO_JSON_PATH.provisioning;
     const data = window._currentScreenData;
     if (!data || data.page !== 'PROVISIONING_SETUP') return;
     const st0 = data.widgets?.find((w) => w && w.id === 'ui_item_prov_status');
@@ -2516,31 +3624,14 @@ function handleProvisioningArrowKey(e) {
     return false;
 }
 
-/** Provisioning is automatic; hide dev phone shortcut on this screen. */
-function syncPhoneSendCredsButtonVisibility() {
-    const btn = document.getElementById('phone-send-creds-btn');
+/** Provisioning uses automatic flow; hide the extra bezel lock control on that screen. */
+function syncThermostatShellLockButtonVisibility() {
+    const btn = document.getElementById('thermostat-shell-lock-btn');
     if (!btn) return;
     const path = String(window._currentJsonPath || '');
     const page = window._currentScreenData?.page;
     const onProv = page === 'PROVISIONING_SETUP' || path.includes('provisioning_setup');
-    btn.classList.toggle('phone-send-creds-btn--hidden', onProv);
-    if (onProv) {
-        btn.classList.remove('phone-send-creds-btn--disabled');
-        btn.removeAttribute('disabled');
-    }
-}
-
-function ensurePhoneSendCredsButtonBound() {
-    if (window._phoneSendCredsBound) return;
-    window._phoneSendCredsBound = true;
-    const btn = document.getElementById('phone-send-creds-btn');
-    if (!btn) return;
-    btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        // Hidden on provisioning (automatic flow); no-op if somehow clicked.
-        runProvisioningSuccessExchange(window._currentJsonPath);
-    });
+    btn.classList.toggle('thermostat-shell-lock-btn--hidden', onProv);
 }
 
 export async function renderScreen(jsonPath) {
@@ -2550,14 +3641,16 @@ export async function renderScreen(jsonPath) {
     }
     window._tstatRenderScreenInFlight = true;
     try {
+    cancelDebouncedSelectLayoutRender();
+    bindExplorerRenameHotkeysOnce();
     // Track active screen path immediately so lock/save actions always apply to current page.
     window._currentJsonPath = jsonPath;
     saveLastScreenPath(jsonPath);
     // Prepare LCD container
     const lcdGrid = document.getElementById('tstat-lcd-container');
     if (!lcdGrid) {
-        const ph = document.getElementById('phone-send-creds-btn');
-        if (ph) ph.classList.add('phone-send-creds-btn--hidden');
+        const ph = document.getElementById('thermostat-shell-lock-btn');
+        if (ph) ph.classList.add('thermostat-shell-lock-btn--hidden');
         return;
     }
     ensureFloatingPanelsDragBound();
@@ -2609,6 +3702,13 @@ export async function renderScreen(jsonPath) {
                 padding: 4px 10px !important;
                 font-weight: 600 !important;
                 border-radius: 4px !important;
+                display: inline-flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                gap: 4px !important;
+            }
+            #btn-lock-save .layout-widgets-panel__play-icon {
+                display: block !important;
             }
         `;
         document.head.appendChild(style);
@@ -2628,12 +3728,17 @@ export async function renderScreen(jsonPath) {
         const lens = document.createElement('div');
         lens.className = 'tstat-lens-outline';
         lens.setAttribute('aria-hidden', 'true');
+        const lensCw = canvasLogicalWidthPx(window._currentScreenData || {});
+        const lensCh = canvasLogicalHeightPx(window._currentScreenData || {});
+        const lensW = Math.round((475 * lensCw) / TSTAT10_LEGACY_DEVKIT_LCD_W);
+        const lensHLegacy = Math.round(484 * 1.3 * 1.2 * 0.95);
+        const lensH = Math.round((lensHLegacy * lensCh) / TSTAT10_LEGACY_DEVKIT_LCD_H);
         lens.style.position = 'absolute';
         lens.style.top = '0';
         lens.style.left = '50%';
         lens.style.transform = 'translateX(-50%)';
-        lens.style.width = '475px';
-        lens.style.height = `${Math.round(484 * 1.3 * 1.2 * 0.95)}px`; /* +30% / +20% vs 484px base, then −5% */
+        lens.style.width = `${lensW}px`;
+        lens.style.height = `${lensH}px`; /* same relative scale as legacy 475×717 outline vs 320×480 canvas */
         lens.style.border = '3px solid #c4c4c4';
         lens.style.background = 'transparent';
         lens.style.boxSizing = 'border-box';
@@ -2641,62 +3746,6 @@ export async function renderScreen(jsonPath) {
         lens.style.zIndex = '15';
         deviceBezel.appendChild(lens);
     }
-        // ...existing code...
-        // After main UI is rendered, add grid overlay if enabled
-        setTimeout(() => {
-            if (window._tstatShowGridLayer) {
-                const lcdGrid2 = document.getElementById('tstat-lcd-container');
-                if (!lcdGrid2) return;
-                // Remove any previous grid overlay
-                const prevGrid2 = lcdGrid2.querySelector('.debug-grid');
-                if (prevGrid2) prevGrid2.remove();
-                const grid = document.createElement('div');
-                grid.className = 'debug-grid';
-                grid.style.zIndex = '10000';
-                grid.style.pointerEvents = 'none';
-                grid.style.position = 'absolute';
-                grid.style.left = '0';
-                grid.style.top = '0';
-                grid.style.width = '320px';
-                grid.style.height = '480px';
-                // Draw grid lines to match lcdTextRows and lcdTextColumns
-                const data = window._currentScreenData;
-                const rows = data?.layout?.lcdTextRows || 10;
-                const cols = data?.layout?.lcdTextColumns || 16;
-                const width = 320;
-                const height = 480;
-                const cellW = width / cols;
-                const cellH = height / rows;
-                // Vertical lines
-                const gridLineColor = window._isVisualEditMode ? 'rgba(203,213,225,0.95)' : 'rgba(255,255,255,0.9)';
-                for (let c = 1; c < cols; c++) {
-                    const vline = document.createElement('div');
-                    vline.style.position = 'absolute';
-                    vline.style.left = (c * cellW) + 'px';
-                    vline.style.top = '0';
-                    vline.style.width = '1px';
-                    vline.style.height = height + 'px';
-                    vline.style.background = gridLineColor;
-                    vline.style.zIndex = '10001';
-                    grid.appendChild(vline);
-                }
-                // Horizontal lines for every LCD row
-                for (let r = 1; r <= rows; r++) {
-                    const hline = document.createElement('div');
-                    hline.style.position = 'absolute';
-                    hline.style.left = '0';
-                    hline.style.top = ((r - 1) * cellH) + 'px';
-                    hline.style.width = width + 'px';
-                    hline.style.height = '1px';
-                    hline.style.background = gridLineColor;
-                    hline.style.zIndex = '10001';
-                    grid.appendChild(hline);
-                }
-                // Always insert grid as the first child so all rows render above it
-                lcdGrid2.insertBefore(grid, lcdGrid2.firstChild);
-                console.log('[DEBUG] Injected debug grid overlay into #tstat-lcd-container (full LCD grid, first child)');
-            }
-        }, 0);
     // Show LCD redbox coordinates in debug panel if present
     setTimeout(() => {
         if (typeof updateRedboxDebugPanel === 'function') updateRedboxDebugPanel();
@@ -2750,12 +3799,18 @@ export async function renderScreen(jsonPath) {
         }
     }
 
+    const PLAY_ICON_SVG =
+        '<svg class="layout-widgets-panel__play-icon" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7L8 5z" fill="currentColor"/></svg>';
+    const THERMOSTAT_SHELL_LOCK_ICON_SVG =
+        '<svg class="thermostat-shell-lock-btn__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M7 11V8a5 5 0 0 1 10 0v3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="16" r="1.2" fill="currentColor"/></svg>';
+    const PLAY_ICON_SHELL_SVG =
+        '<svg class="thermostat-shell-lock-btn__icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7L8 5z" fill="currentColor"/></svg>';
     const lockBtn = document.getElementById('btn-lock-save');
     if (lockBtn) {
         if (window._isVisualEditMode) {
-            lockBtn.textContent = 'Play';
-            lockBtn.title = 'Play mode — save and preview (exit layout edit)';
-            lockBtn.setAttribute('aria-label', 'Play mode, save and exit layout edit');
+            lockBtn.innerHTML = PLAY_ICON_SVG;
+            lockBtn.title = 'Run — save and exit layout edit (same as top bar play)';
+            lockBtn.setAttribute('aria-label', 'Run, save and exit layout edit');
             lockBtn.classList.add('is-active');
         } else {
             lockBtn.textContent = 'Edit';
@@ -2764,30 +3819,25 @@ export async function renderScreen(jsonPath) {
             lockBtn.classList.remove('is-active');
         }
     }
-    const thermostatLockBtn = document.getElementById('thermostat-lock-toggle');
-    const slsEditLockBtn = document.getElementById('sls-edit-lock-toggle');
-    if (slsEditLockBtn) {
-        slsEditLockBtn.textContent = window._isVisualEditMode ? '🔓' : '🔒';
-        slsEditLockBtn.classList.toggle('is-active', !!window._isVisualEditMode);
-        slsEditLockBtn.title = window._isVisualEditMode
-            ? 'Unlock: exit layout edit (lock & save)'
-            : 'Lock: enter layout edit (Tstat10)';
-        slsEditLockBtn.setAttribute('aria-label', window._isVisualEditMode ? 'Lock and exit layout edit' : 'Unlock layout edit');
-    }
-    if (thermostatLockBtn) {
-        // Semantics: locked = runtime mode (grid usually off), unlocked = edit mode (grid on).
-        thermostatLockBtn.textContent = window._isVisualEditMode ? '🔓' : '🔒';
-        thermostatLockBtn.classList.toggle('is-active', !!window._isVisualEditMode);
-        thermostatLockBtn.title = window._isVisualEditMode
-            ? 'Editing unlocked (tap to lock)'
-            : 'Locked runtime mode (tap to unlock for edit)';
+    const shellLockBtn = document.getElementById('thermostat-shell-lock-btn');
+    if (shellLockBtn) {
+        if (window._isVisualEditMode) {
+            shellLockBtn.innerHTML = PLAY_ICON_SHELL_SVG;
+            shellLockBtn.title = 'Run — save and exit layout edit (same as top bar play)';
+            shellLockBtn.setAttribute('aria-label', 'Run, save and exit layout edit');
+            shellLockBtn.classList.add('is-active');
+        } else {
+            shellLockBtn.innerHTML = THERMOSTAT_SHELL_LOCK_ICON_SVG;
+            shellLockBtn.title = 'Enter layout edit — tap again (play) to run and save';
+            shellLockBtn.setAttribute('aria-label', 'Enter layout edit mode');
+            shellLockBtn.classList.remove('is-active');
+        }
     }
 
     // Only fetch JSON and set window._networkSettingsData if not already set (preserve user changes)
     let data;
     // Check if we already have the data loaded for this specific screen
     if (!window._currentScreenData || window._lastLoadedJsonPath !== jsonPath) {
-        const preferCacheFirst = !!window._isVisualEditMode;
         const applyFetched = (parsed) => {
             data = parsed;
             window._currentScreenData = data;
@@ -2806,19 +3856,9 @@ export async function renderScreen(jsonPath) {
             applyFetched(await resp.json());
         };
 
-        if (preferCacheFirst) {
-            // Layout edit: keep unsaved work from localStorage when present.
-            if (!loadFromCache()) {
-                try {
-                    await loadFromNetwork();
-                } catch (e) {
-                    lcd.innerHTML = `<div style="color:red; padding: 20px;">Failed to load ${jsonPath}</div>`;
-                    console.error(e);
-                    return;
-                }
-            }
-        } else {
-            // Runtime: always prefer fresh JSON from disk so cached drafts cannot diverge from repo files.
+        // Prefer browser draft (localStorage) whenever present so Inspector edits (bg, theme, workbench offsets)
+        // survive reload, exiting layout edit, and navigation — same as layout edit. Fetch only when no cache.
+        if (!loadFromCache()) {
             try {
                 await loadFromNetwork();
             } catch (e) {
@@ -2834,36 +3874,13 @@ export async function renderScreen(jsonPath) {
     }
     data = window._currentScreenData;
     ensureCanonicalSchema(data);
+    enforceSimulatorFixedLcdCanvas(data);
     ensureProvisioningSetupHasRssi(data);
-    if (data.page === 'MAIN_DISPLAY') {
-        data.canvasProfile = data.canvasProfile || {};
-        data.layout = data.layout || {};
-        data.layout.lcdCanvas = data.layout.lcdCanvas || {};
-        data.layout.canvas = data.layout.canvas || {};
-        data.canvasProfile.width = 320;
-        data.canvasProfile.height = 480;
-        data.layout.lcdCanvas.width = 320;
-        data.layout.lcdCanvas.height = 480;
-        data.layout.canvas.width = 320;
-        data.layout.canvas.height = 480;
-    }
     ensureMainDisplayIconLayout(data);
-    // Guard against stale cached canvas heights (older edit sessions used compressed LCD heights).
-    const cw = Number(data?.canvasProfile?.width || data?.layout?.lcdCanvas?.width || data?.layout?.canvas?.width || 320);
-    const ch = Number(data?.canvasProfile?.height || data?.layout?.lcdCanvas?.height || data?.layout?.canvas?.height || 480);
-    if (cw < 300 || ch < 450) {
-        data.canvasProfile = data.canvasProfile || {};
-        data.layout = data.layout || {};
-        data.layout.lcdCanvas = data.layout.lcdCanvas || {};
-        data.layout.canvas = data.layout.canvas || {};
-        data.canvasProfile.width = 320;
-        data.canvasProfile.height = 480;
-        data.layout.lcdCanvas.width = 320;
-        data.layout.lcdCanvas.height = 480;
-        data.layout.canvas.width = 320;
-        data.layout.canvas.height = 480;
-    }
+    // LCD nudge is global (`tstat10_lcd_bezel_nudge_px` in ui-bridge); never re-read per-screen JSON/cache
+    // on navigation — that used to jump the framebuffer between routes.
     // Persist working copy continuously so refresh does not drop recent edits.
+    syncWorkbenchNudgeIntoScreenDataForCache(data);
     saveScreenToCache(jsonPath, data);
     ensureIpv4AlignedStyles();
     syncSlStudioWorkbenchChrome(jsonPath, data);
@@ -2871,8 +3888,8 @@ export async function renderScreen(jsonPath) {
     renderLayoutPropertiesPanel(data, jsonPath, renderScreen);
     const gridCols = data.layout?.lcdTextColumns || 16;
     const gridRows = data.layout?.lcdTextRows || 10;
-    const canvasWidthPx = data.layout?.lcdCanvas?.width || 320;
-    const canvasHeightPx = data.layout?.lcdCanvas?.height || 480;
+    const canvasWidthPx = canvasLogicalWidthPx(data);
+    const canvasHeightPx = canvasLogicalHeightPx(data);
     const gridCellW = canvasWidthPx / gridCols;
     const gridCellH = canvasHeightPx / gridRows;
     const quarterCharStep = gridCellW / 4;
@@ -2896,9 +3913,27 @@ export async function renderScreen(jsonPath) {
         if (fi >= 0) window._currentScreenFocus = fi;
     }
     function selectLayoutNode(nodeId) {
+        const prev = window._layoutSelectedNodeId;
         window._layoutSelectedNodeId = nodeId;
         syncMenuFocusFromLayoutNodeId(nodeId, window._currentScreenData || data);
-        renderScreen(jsonPath);
+        if (prev === nodeId) {
+            applySelectionOutline();
+            return;
+        }
+        cancelDebouncedSelectLayoutRender();
+        applySelectionOutline();
+        // Keep hierarchy + inspector in lockstep with canvas/shell selection immediately (AGENTS.md item 4).
+        // Debounced renderScreen only rebuilds LCD DOM; authors should not wait ~320ms for tree highlight / inspector.
+        const syncData = window._currentScreenData || data;
+        const syncPath = window._currentJsonPath || jsonPath;
+        if (syncData) {
+            renderLayoutTreePanel(syncData, syncPath, renderScreen);
+            renderLayoutPropertiesPanel(syncData, syncPath, renderScreen);
+        }
+        window._layoutSelectRenderDebounceTimer = setTimeout(() => {
+            window._layoutSelectRenderDebounceTimer = null;
+            renderScreen(jsonPath);
+        }, 320);
     }
     window._selectLayoutNode = selectLayoutNode;
     const pushUndoSnapshot = () => {
@@ -2981,6 +4016,29 @@ export async function renderScreen(jsonPath) {
         }, true);
     }
     installLcdSelectionSync();
+    function installTstatShellSelectionSync() {
+        const host = document.getElementById('tstat-container');
+        if (!host || host._tstatShellSelectionSyncBound) return;
+        host._tstatShellSelectionSyncBound = true;
+        host.addEventListener(
+            'mousedown',
+            (evt) => {
+                if (!window._isVisualEditMode) return;
+                const t = evt.target;
+                if (!t || !t.closest) return;
+                const nodeEl = t.closest('[data-tree-node-id]');
+                if (!nodeEl || !host.contains(nodeEl)) return;
+                if (lcd.contains(nodeEl)) return;
+                const nid = nodeEl.dataset?.treeNodeId;
+                if (!nid || !nid.startsWith('shell-')) return;
+                if (window._layoutSelectedNodeId !== nid) {
+                    selectLayoutNode(nid);
+                }
+            },
+            true
+        );
+    }
+    installTstatShellSelectionSync();
     const ensureEditHint = () => {
         const hint = document.getElementById('layout-edit-hint');
         if (!window._isVisualEditMode) {
@@ -2997,6 +4055,7 @@ export async function renderScreen(jsonPath) {
         el.contentEditable = 'false';
         const startEditing = () => {
             if (el._inlineEditing) return;
+            cancelDebouncedSelectLayoutRender();
             el._inlineEditing = true;
             el.contentEditable = 'true';
             el.style.cursor = 'text';
@@ -3316,19 +4375,219 @@ export async function renderScreen(jsonPath) {
         if (window._lcdEditorPanelBound) return;
         window._lcdEditorPanelBound = true;
 
-        const widthInput = document.getElementById('editor-canvas-width');
-        const heightInput = document.getElementById('editor-canvas-height');
+        const canvasSizeReadout = document.getElementById('editor-canvas-size-readout');
         const orientationInput = document.getElementById('editor-orientation');
         const colorModeInput = document.getElementById('editor-color-mode');
-        if (!widthInput || !heightInput || !orientationInput || !colorModeInput) return;
+        const bgInput = document.getElementById('editor-screen-bg');
+        const bgPicker = document.getElementById('editor-screen-bg-picker');
+        const bgPalette = document.getElementById('editor-screen-bg-palette');
+        const presetSelect = document.getElementById('editor-lcd-preset');
+        const presetHint = document.getElementById('editor-lcd-preset-hint');
+        const canvasSizeHint = document.getElementById('editor-canvas-size-hint');
+        const gridColsInput = document.getElementById('editor-grid-cols');
+        const gridRowsInput = document.getElementById('editor-grid-rows');
+        const firmwareThemeSelect = document.getElementById('editor-lcd-firmware-theme');
+        if (!canvasSizeReadout || !orientationInput || !colorModeInput || !presetSelect) return;
+
+        if (presetSelect && presetSelect.options.length === 0) {
+            for (const p of LCD_PLATFORM_PRESETS) {
+                const opt = document.createElement('option');
+                opt.value = p.id;
+                opt.textContent = p.label;
+                presetSelect.appendChild(opt);
+            }
+        }
+
+        if (firmwareThemeSelect && firmwareThemeSelect.options.length <= 1) {
+            for (const t of FIRMWARE_LCD_COLOR_THEME_LIST) {
+                const opt = document.createElement('option');
+                opt.value = t.id;
+                opt.textContent = t.label;
+                firmwareThemeSelect.appendChild(opt);
+            }
+        }
+
+        const syncFirmwareThemeSelect = () => {
+            const d = window._currentScreenData;
+            if (!firmwareThemeSelect || !d) return;
+            firmwareThemeSelect.value = findMatchingFirmwareThemeId(d);
+        };
+
+        const setPresetHint = (preset) => {
+            if (!presetHint) return;
+            const note = preset?.paletteNote || '';
+            presetHint.textContent = note;
+            presetHint.hidden = !note;
+        };
+
+        const syncBgPickerFromText = () => {
+            if (!bgPicker || !bgInput) return;
+            const mode = colorModeInput.value || 'indexed';
+            if (mode === 'indexed') {
+                bgPicker.hidden = true;
+                return;
+            }
+            bgPicker.hidden = false;
+            const q =
+                quantizeCssColorToRgb565Hex(bgInput.value) ||
+                quantizeCssColorToRgb565Hex(TSTAT10_FW_BG_CSS);
+            if (q) bgPicker.value = q;
+        };
+
+        const updateBgSwatchActiveState = () => {
+            if (!bgPalette || !bgInput) return;
+            const mode = colorModeInput.value || 'indexed';
+            const raw = (bgInput.value || '').trim();
+            let cur = null;
+            if (!raw) {
+                cur = clampBackgroundToColorMode(TSTAT10_FW_BG_CSS, mode);
+            } else if (mode === 'indexed') {
+                cur = clampBackgroundToColorMode(raw, 'indexed');
+            } else {
+                const q = quantizeCssColorToRgb565Hex(raw);
+                cur = q !== null ? q : null;
+            }
+            const curL = cur ? cur.toLowerCase() : '';
+            for (const el of bgPalette.querySelectorAll('.layout-props-screen-section__bg-swatch')) {
+                const target = (el.dataset.bgCss || '').toLowerCase();
+                const match = curL !== '' && target === curL;
+                el.classList.toggle('is-active', match);
+                el.setAttribute('aria-pressed', match ? 'true' : 'false');
+            }
+        };
+
+        const rebuildEditorBgPalette = () => {
+            if (!bgPalette) return;
+            const mode = colorModeInput.value || 'indexed';
+            bgPalette.replaceChildren();
+            if (mode === 'indexed') {
+                for (const s of INDEXED_BACKGROUND_SWATCHES) {
+                    const b = document.createElement('button');
+                    b.type = 'button';
+                    b.className = 'layout-props-screen-section__bg-swatch';
+                    b.title = s.label;
+                    b.setAttribute('aria-label', s.label);
+                    b.dataset.bgCss = s.css;
+                    b.style.backgroundColor = s.css;
+                    b.addEventListener('click', () => {
+                        if (bgInput) bgInput.value = s.css;
+                        syncBgPickerFromText();
+                        onFieldChange();
+                        commitProjectWideBackgroundIfPossible();
+                        updateBgSwatchActiveState();
+                    });
+                    bgPalette.appendChild(b);
+                }
+            } else {
+                for (const t of LCD_THEME_RGB565_SWATCHES) {
+                    const css = rgb565ToCssHex(t.word);
+                    const b = document.createElement('button');
+                    b.type = 'button';
+                    b.className = 'layout-props-screen-section__bg-swatch';
+                    b.title = `${t.label} — 0x${t.word.toString(16)}`;
+                    b.setAttribute('aria-label', t.label);
+                    b.dataset.bgCss = css;
+                    b.style.backgroundColor = css;
+                    b.addEventListener('click', () => {
+                        if (bgInput) bgInput.value = css;
+                        syncBgPickerFromText();
+                        onFieldChange();
+                        commitProjectWideBackgroundIfPossible();
+                        updateBgSwatchActiveState();
+                    });
+                    bgPalette.appendChild(b);
+                }
+            }
+            if (bgPicker) bgPicker.hidden = mode === 'indexed';
+            syncBgPickerFromText();
+            updateBgSwatchActiveState();
+        };
+
+        const syncCanvasSizeReadout = () => {
+            if (!canvasSizeReadout) return;
+            const d = window._currentScreenData;
+            if (!d?.canvasProfile) {
+                canvasSizeReadout.textContent = '—';
+                return;
+            }
+            const w = Number(d.canvasProfile.width);
+            const h = Number(d.canvasProfile.height);
+            if (!w || !h) {
+                canvasSizeReadout.textContent = '—';
+                return;
+            }
+            canvasSizeReadout.textContent = `${w} × ${h}`;
+        };
+
+        const syncCanvasSizeHint = () => {
+            if (!canvasSizeHint) return;
+            const d = window._currentScreenData;
+            const preset = d ? resolveLcdPresetSelection(d.canvasProfile || {}) : null;
+            const isCustom = preset?.id === 'custom';
+            if (isCustom) {
+                canvasSizeHint.hidden = false;
+                canvasSizeHint.textContent =
+                    'Custom LCD size comes from this screen JSON; change preset or orientation above, or edit JSON for explicit width/height.';
+            } else {
+                canvasSizeHint.hidden = true;
+                canvasSizeHint.textContent = '';
+            }
+        };
 
         const updateInputsFromData = () => {
             if (!window._currentScreenData) return;
             const d = window._currentScreenData;
-            widthInput.value = d.canvasProfile?.width || 320;
-            heightInput.value = d.canvasProfile?.height || 480;
-            orientationInput.value = d.canvasProfile?.orientation || 'vertical';
+            const cw = Number(d.canvasProfile?.width || DEFAULT_LCD_W);
+            const ch = Number(d.canvasProfile?.height || DEFAULT_LCD_H);
+            const resolved = resolveLcdPresetSelection(d.canvasProfile || {});
+            if (presetSelect) {
+                presetSelect.value = resolved.id;
+                setPresetHint(resolved);
+            }
+            const inferred = inferOrientationFromPresetAndCanvas(resolved, cw, ch);
+            const storedOrient =
+                d.canvasProfile?.orientation === 'horizontal' || d.canvasProfile?.orientation === 'vertical'
+                    ? d.canvasProfile.orientation
+                    : null;
+            const squarePreset =
+                resolved.id !== 'custom' &&
+                resolved.width != null &&
+                resolved.height != null &&
+                resolved.width === resolved.height;
+            const orientationValue =
+                squarePreset && storedOrient
+                    ? storedOrient
+                    : inferred != null
+                      ? inferred
+                      : storedOrient || 'vertical';
+            orientationInput.value = orientationValue;
+            syncCanvasSizeReadout();
+            syncCanvasSizeHint();
             colorModeInput.value = d.colorProfile?.mode || 'indexed';
+            if (bgInput) bgInput.value = d.styles?.bg || TSTAT10_FW_BG_CSS;
+            syncBgPickerFromText();
+            if (gridColsInput) {
+                gridColsInput.value = String(
+                    clampGridDimensionInput(
+                        d.layout?.lcdTextColumns,
+                        LCD_GRID_COLS_MIN,
+                        LCD_GRID_COLS_MAX,
+                        16
+                    )
+                );
+            }
+            if (gridRowsInput) {
+                gridRowsInput.value = String(
+                    clampGridDimensionInput(
+                        d.layout?.lcdTextRows,
+                        LCD_GRID_ROWS_MIN,
+                        LCD_GRID_ROWS_MAX,
+                        10
+                    )
+                );
+            }
+            rebuildEditorBgPalette();
+            syncFirmwareThemeSelect();
         };
 
         const applyCanvasFromInputs = () => {
@@ -3336,20 +4595,215 @@ export async function renderScreen(jsonPath) {
             if (!d) return;
             if (!d.canvasProfile) d.canvasProfile = {};
             if (!d.colorProfile) d.colorProfile = {};
-            d.canvasProfile.width = Number(widthInput.value || 320);
-            d.canvasProfile.height = Number(heightInput.value || 480);
-            d.canvasProfile.orientation = orientationInput.value || 'vertical';
+            if (presetSelect && presetSelect.value) {
+                d.canvasProfile.lcdPresetId = presetSelect.value;
+            }
+            const preset = getLcdPresetById(d.canvasProfile.lcdPresetId || 'custom');
+            const orient = orientationInput.value || 'vertical';
+            d.canvasProfile.orientation = orient;
+            if (preset.id !== 'custom') {
+                const dim = canvasPixelSizeForPresetOrientation(preset, orient);
+                if (dim) {
+                    d.canvasProfile.width = dim.width;
+                    d.canvasProfile.height = dim.height;
+                }
+            } else {
+                const a = Math.max(1, Number(d.canvasProfile.width || DEFAULT_LCD_W));
+                const b = Math.max(1, Number(d.canvasProfile.height || DEFAULT_LCD_H));
+                const min = Math.min(a, b);
+                const max = Math.max(a, b);
+                const portrait = orient !== 'horizontal';
+                if (portrait) {
+                    d.canvasProfile.width = min;
+                    d.canvasProfile.height = max;
+                } else {
+                    d.canvasProfile.width = max;
+                    d.canvasProfile.height = min;
+                }
+            }
             d.colorProfile.mode = colorModeInput.value || 'indexed';
+            if (!d.layout) d.layout = {};
+            if (gridColsInput) {
+                d.layout.lcdTextColumns = clampGridDimensionInput(
+                    gridColsInput.value,
+                    LCD_GRID_COLS_MIN,
+                    LCD_GRID_COLS_MAX,
+                    16
+                );
+                gridColsInput.value = String(d.layout.lcdTextColumns);
+            }
+            if (gridRowsInput) {
+                d.layout.lcdTextRows = clampGridDimensionInput(
+                    gridRowsInput.value,
+                    LCD_GRID_ROWS_MIN,
+                    LCD_GRID_ROWS_MAX,
+                    10
+                );
+                gridRowsInput.value = String(d.layout.lcdTextRows);
+            }
+            if (bgInput) {
+                if (!d.styles) d.styles = {};
+                d.styles.bg = (bgInput.value || '').trim() || TSTAT10_FW_BG_CSS;
+                mergeProjectBackgroundIntoScreenData(d, d.styles.bg);
+            }
+            const resolved = resolveLcdPresetSelection(d.canvasProfile);
+            d.canvasProfile.lcdPresetId = resolved.id;
+            if (presetSelect) {
+                presetSelect.value = resolved.id;
+                setPresetHint(resolved);
+            }
             ensureCanonicalSchema(d);
-            writeStatus('Screen canvas updated.');
+            syncFirmwareThemeSelect();
+            syncCanvasSizeReadout();
+            syncCanvasSizeHint();
+            writeStatus(
+                'Screen canvas updated. Use “Apply layout” if widget positions should scale to the new size.'
+            );
             renderScreen(window._currentJsonPath || jsonPath);
         };
 
+        const commitProjectWideBackgroundIfPossible = () => {
+            const d = window._currentScreenData;
+            const p = window._currentJsonPath || jsonPath;
+            if (!d?.styles?.bg || !p) return;
+            const hl = String(d.styles?.highlight || '').trim();
+            const mode = d.colorProfile?.mode;
+            if (hl && (mode === 'indexed' || mode === 'reduced_rgb')) {
+                propagateProjectWideFirmwareTheme(d.styles.bg, hl, p, mode);
+                writeStatus(
+                    'Theme (background + highlight) applied project-wide (cached screens updated; others load from disk in background).',
+                    false
+                );
+            } else {
+                propagateProjectWideBackground(d.styles.bg, p);
+                writeStatus(
+                    'Background applied project-wide (all screen JSON in browser cache; uncached pages load from disk in background).',
+                    false
+                );
+            }
+        };
+
         const onFieldChange = () => applyCanvasFromInputs();
-        widthInput.addEventListener('change', onFieldChange);
-        heightInput.addEventListener('change', onFieldChange);
         orientationInput.addEventListener('change', onFieldChange);
-        colorModeInput.addEventListener('change', onFieldChange);
+        colorModeInput.addEventListener('change', () => {
+            onFieldChange();
+            rebuildEditorBgPalette();
+        });
+        if (gridColsInput) gridColsInput.addEventListener('change', onFieldChange);
+        if (gridRowsInput) gridRowsInput.addEventListener('change', onFieldChange);
+        if (bgInput) {
+            bgInput.addEventListener('change', () => {
+                syncBgPickerFromText();
+                onFieldChange();
+                commitProjectWideBackgroundIfPossible();
+                updateBgSwatchActiveState();
+            });
+            bgInput.addEventListener('input', () => {
+                syncBgPickerFromText();
+                onFieldChange();
+                updateBgSwatchActiveState();
+            });
+        }
+        if (bgPicker) {
+            bgPicker.addEventListener('input', () => {
+                const q = quantizeCssColorToRgb565Hex(bgPicker.value);
+                if (bgInput && q) bgInput.value = q;
+                onFieldChange();
+                updateBgSwatchActiveState();
+            });
+            bgPicker.addEventListener('change', () => {
+                syncBgPickerFromText();
+                onFieldChange();
+                commitProjectWideBackgroundIfPossible();
+                updateBgSwatchActiveState();
+            });
+        }
+
+        if (presetSelect) {
+            presetSelect.addEventListener('change', () => {
+                const d = window._currentScreenData;
+                if (!d) return;
+                const p = getLcdPresetById(presetSelect.value);
+                if (!d.canvasProfile) d.canvasProfile = {};
+                d.canvasProfile.lcdPresetId = p.id;
+                if (p.id !== 'custom' && p.width != null && p.height != null) {
+                    const orient = orientationInput.value || 'vertical';
+                    const dim = canvasPixelSizeForPresetOrientation(p, orient);
+                    if (dim) {
+                        d.canvasProfile.width = dim.width;
+                        d.canvasProfile.height = dim.height;
+                        d.canvasProfile.orientation = orient;
+                    }
+                }
+                if (p.colorMode && colorModeInput) {
+                    colorModeInput.value = p.colorMode;
+                    d.colorProfile = d.colorProfile || {};
+                    d.colorProfile.mode = p.colorMode;
+                }
+                if (p.driver && String(p.driver).trim()) {
+                    d.compatibility = d.compatibility || {};
+                    d.compatibility.lcdDriver = String(p.driver).trim();
+                }
+                setPresetHint(p);
+                ensureCanonicalSchema(d);
+                syncCanvasSizeReadout();
+                syncCanvasSizeHint();
+                writeStatus(
+                    p.id === 'custom'
+                        ? 'LCD: custom — pixel size stays from this screen JSON; use Apply layout if you edit JSON elsewhere.'
+                        : `LCD preview: ${d.canvasProfile.width}×${d.canvasProfile.height}${p.driver ? ` (${p.driver})` : ''}. Use “Apply layout” to rescale widgets.`
+                );
+                renderScreen(window._currentJsonPath || jsonPath);
+                rebuildEditorBgPalette();
+            });
+        }
+
+        if (firmwareThemeSelect) {
+            firmwareThemeSelect.addEventListener('change', () => {
+                const v = firmwareThemeSelect.value;
+                if (v === FIRMWARE_LCD_THEME_CUSTOM_ID) return;
+                const d = window._currentScreenData;
+                const p = window._currentJsonPath || jsonPath;
+                if (!d || !p) return;
+                if (!applyFirmwareColorThemeToScreenData(d, v)) return;
+                try {
+                    syncWorkbenchNudgeIntoScreenDataForCache(d);
+                    saveScreenToCache(p, d);
+                } catch {
+                    /* ignore */
+                }
+                propagateProjectWideFirmwareTheme(
+                    d.styles.bg,
+                    d.styles.highlight,
+                    p,
+                    d.colorProfile?.mode || 'reduced_rgb'
+                );
+                ensureCanonicalSchema(d);
+                if (colorModeInput) colorModeInput.value = d.colorProfile?.mode || 'reduced_rgb';
+                if (bgInput) bgInput.value = d.styles?.bg || TSTAT10_FW_BG_CSS;
+                syncBgPickerFromText();
+                rebuildEditorBgPalette();
+                updateBgSwatchActiveState();
+                syncFirmwareThemeSelect();
+                writeStatus(
+                    'Firmware color theme applied to all cached screen JSON (background + row highlight; color mode → reduced_rgb).',
+                    false
+                );
+                renderScreen(p);
+            });
+        }
+
+        const applyRemapBtn = document.getElementById('editor-apply-layout-remap');
+        if (applyRemapBtn && !applyRemapBtn.dataset.bound) {
+            applyRemapBtn.dataset.bound = '1';
+            applyRemapBtn.addEventListener('click', () => {
+                const d = window._currentScreenData;
+                if (!d) return;
+                const r = applyLayoutRemapToMatchCanvas(d);
+                writeStatus(r.message, !r.ok);
+                if (r.ok) renderScreen(window._currentJsonPath || jsonPath);
+            });
+        }
 
         window._syncLcdEditorInputs = updateInputsFromData;
         updateInputsFromData();
@@ -3360,22 +4814,31 @@ export async function renderScreen(jsonPath) {
         window._syncLcdEditorInputs();
     }
 
-    lcd.style.background = data.styles?.bg || '#2c7cc4';
+    lcd.style.background = resolvedScreenBackgroundCss(data);
     lcd.style.color = '#fff';
-    lcd.style.position = 'relative';
+    /* Keep CSS bezel slot (`simulator.css`: absolute + top); `relative` broke LCD placement in the mock shell. */
+    lcd.style.removeProperty('position');
     lcd.style.fontFamily = data.styles?.fontFamily || 'Segoe UI, Arial, sans-serif';
     lcd.style.padding = '0';
-    const lcdCanvasWidth = data.page === 'MAIN_DISPLAY'
-        ? 320
-        : (data.canvasProfile?.width || data.layout?.canvas?.width || 320);
-    const lcdCanvasHeight = data.page === 'MAIN_DISPLAY'
-        ? 480
-        : (data.canvasProfile?.height || data.layout?.canvas?.height || 480);
+    const lcdCanvasWidth =
+        Number(data.canvasProfile?.width ||
+            data.layout?.lcdCanvas?.width ||
+            data.layout?.canvas?.width ||
+            DEFAULT_LCD_W) || DEFAULT_LCD_W;
+    const lcdCanvasHeight =
+        Number(data.canvasProfile?.height ||
+            data.layout?.lcdCanvas?.height ||
+            data.layout?.canvas?.height ||
+            DEFAULT_LCD_H) || DEFAULT_LCD_H;
     lcd.style.width = lcdCanvasWidth + 'px';
     lcd.style.height = lcdCanvasHeight + 'px';
     if (data.page === 'MAIN_DISPLAY') {
         lcd.style.overflow = 'hidden';
-        lcd.style.transform = 'none';
+    } else {
+        lcd.style.removeProperty('overflow');
+    }
+    if (typeof window._applyTstatLcdNudgeTransform === 'function') {
+        window._applyTstatLcdNudgeTransform();
     }
 
     // Helper to show the alignment context menu during Visual Edit Mode
@@ -3419,7 +4882,7 @@ export async function renderScreen(jsonPath) {
             
             const widthKey = alignKey === 'labelAlign' ? 'labelWidth' : 'valueWidth';
             const defaultWidth = alignKey === 'labelAlign' ? (data.layout?.labelColumn?.width || 120) : (data.layout?.valueColumn?.width || 120);
-            const charWidth = (data.layout?.lcdCanvas?.width || 320) / (data.layout?.lcdTextColumns || 16);
+            const charWidth = canvasLogicalWidthPx(data) / (data.layout?.lcdTextColumns || 16);
             
             const growBtn = document.createElement('button');
             growBtn.textContent = 'Grow Width (+1 char)';
@@ -3478,8 +4941,7 @@ export async function renderScreen(jsonPath) {
     const focusedMenuRowId = menuRows[menuRowsFocusedIndex]?.id || null;
     let menuRowCounter = 0;
     const menuRowGap = data.layout?.menuRowGap || 0;
-    // Use 48px per row for a 10-row grid
-    const menuRowPixelHeight = 48;
+    const menuRowPixelHeight = Math.max(8, Number(data.layout?.menuRowPixelHeight) || TSTAT10_MENU_ROW_PX_DEFAULT);
     const headerY = 0; // Top row
     const menuRowsTop = headerY + menuRowPixelHeight;
     data.widgets.forEach((widget, idx) => {
@@ -3492,7 +4954,7 @@ export async function renderScreen(jsonPath) {
             const header = document.createElement('div');
             header.style.position = 'absolute';
             header.style.left = '0px';
-            header.style.width = (data.layout?.lcdCanvas?.width || 320) + 'px';
+            header.style.width = canvasLogicalWidthPx(data) + 'px';
             const lcdRow = widget.lcdRow || 1;
             header.style.top = ((lcdRow - 1) * menuRowPixelHeight) + 'px';
             header.style.textAlign = widget.align || data.layout?.headerLayout?.align || 'center';
@@ -3506,7 +4968,8 @@ export async function renderScreen(jsonPath) {
                 header.addEventListener('mousedown', (evt) => {
                     evt.preventDefault();
                     evt.stopPropagation();
-                    selectLayoutNode(`w-${idx}`);
+                    const nid = `w-${idx}`;
+                    if (window._layoutSelectedNodeId !== nid) selectLayoutNode(nid);
                 });
             }
 
@@ -3536,7 +4999,8 @@ export async function renderScreen(jsonPath) {
                             return;
                         }
                     }
-                    selectLayoutNode(`w-${idx}`);
+                    const nid = `w-${idx}`;
+                    if (window._layoutSelectedNodeId !== nid) selectLayoutNode(nid);
                 });
             }
             label.style.position = 'absolute';
@@ -3715,7 +5179,7 @@ export async function renderScreen(jsonPath) {
             row.style.alignItems = 'center';
             // Make row span the full canvas width minus left padding
             const rowLeftPad = data.layout?.rowLeftPadding || 0;
-            const canvasW = data.layout?.canvas?.width || 320;
+            const canvasW = canvasLogicalWidthPx(data);
             row.style.width = (canvasW - rowLeftPad) + 'px';
             row.style.right = '';
 
@@ -3849,7 +5313,7 @@ export async function renderScreen(jsonPath) {
                 const highlight = document.createElement('div');
                 highlight.style.position = 'absolute';
                 // Make the highlight one char narrower, with a char of space on each side
-                const charWidth = (data.layout?.lcdCanvas?.width || 320) / (data.layout?.lcdTextColumns || 16);
+                const charWidth = canvasLogicalWidthPx(data) / (data.layout?.lcdTextColumns || 16);
                 const defaultInsetX = charWidth / 2;
                 const insetX = Number(widget.highlightInsetX ?? defaultInsetX);
                 const insetY = Number(widget.highlightInsetY ?? 0);
@@ -3861,7 +5325,7 @@ export async function renderScreen(jsonPath) {
                 highlight.style.top = insetY + 'px';
                 highlight.style.width = highlightWidth;
                 highlight.style.height = highlightHeight + 'px';
-                highlight.style.background = data.styles?.highlight || '#008080';
+                highlight.style.background = data.styles?.highlight || TSTAT10_FW_HIGHLIGHT_CSS;
                 highlight.style.borderRadius = `${Number(widget.highlightRadius ?? 8)}px`;
                 highlight.style.zIndex = '0';
                 highlight.style.pointerEvents = 'none';
@@ -3871,7 +5335,7 @@ export async function renderScreen(jsonPath) {
                     highlight.style.background = 'rgba(255,255,255,0.22)';
                     highlight.style.opacity = (widget.id === focusedMenuRow?.id) ? '1' : '0';
                 } else {
-                    highlight.style.background = data.styles?.highlight || '#008080';
+                    highlight.style.background = data.styles?.highlight || TSTAT10_FW_HIGHLIGHT_CSS;
                     highlight.style.opacity = (widget.id === focusedMenuRow?.id) ? '1' : '0';
                 }
                 row.insertBefore(highlight, row.firstChild);
@@ -4121,7 +5585,7 @@ export async function renderScreen(jsonPath) {
                     // Fast resize using mouse wheel
                     labelSpanFixed.addEventListener('wheel', (e) => {
                         e.preventDefault();
-                        const charWidth = (data.layout?.lcdCanvas?.width || 320) / (data.layout?.lcdTextColumns || 16);
+                        const charWidth = canvasLogicalWidthPx(data) / (data.layout?.lcdTextColumns || 16);
                         const defaultWidth = data.layout?.labelColumn?.width || 120;
                         let currentWidth = widget.labelWidth || defaultWidth;
                         if (e.deltaY < 0) widget.labelWidth = currentWidth + charWidth; // scroll up grows
@@ -4185,7 +5649,7 @@ export async function renderScreen(jsonPath) {
                     // Fast resize using mouse wheel
                     valueSpan.addEventListener('wheel', (e) => {
                         e.preventDefault();
-                        const charWidth = (data.layout?.lcdCanvas?.width || 320) / (data.layout?.lcdTextColumns || 16);
+                        const charWidth = canvasLogicalWidthPx(data) / (data.layout?.lcdTextColumns || 16);
                         const defaultWidth = data.layout?.valueColumn?.width || 120;
                         let currentWidth = widget.valueWidth || defaultWidth;
                         if (e.deltaY < 0) widget.valueWidth = currentWidth + charWidth; // scroll up grows
@@ -4401,7 +5865,7 @@ export async function renderScreen(jsonPath) {
                 menu.style.display = 'flex';
                 menu.style.flexDirection = 'column';
                 menu.style.padding = '5px';
-                const charW = (data.layout?.lcdCanvas?.width || 320) / (data.layout?.lcdTextColumns || 16);
+                const charW = canvasLogicalWidthPx(data) / (data.layout?.lcdTextColumns || 16);
                 
                 const nudgeLeft = document.createElement('button');
                 nudgeLeft.textContent = 'Nudge Left (-1 char)';
@@ -4489,9 +5953,10 @@ export async function renderScreen(jsonPath) {
         lcd.appendChild(preview);
     }
     setupMainTickerSimulation(data);
-    ensurePhoneSendCredsButtonBound();
-    syncPhoneSendCredsButtonVisibility();
+    syncThermostatShellLockButtonVisibility();
+    injectLcdSnapGridOverlay(lcd, data, lcdCanvasWidth, lcdCanvasHeight);
     applySelectionOutline();
+    if (typeof window._syncTstatLcdEdgeDragLayer === 'function') window._syncTstatLcdEdgeDragLayer();
     } finally {
         window._tstatRenderScreenInFlight = false;
         const q = window._tstatRenderScreenQueuedPath;
@@ -4923,7 +6388,7 @@ function bindKeyboardHandlersOnce() {
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
         // Restore last edited/visited screen on refresh.
-        const startupPath = loadLastScreenPath() || './main_display.json';
+        const startupPath = loadLastScreenPath() || DEFAULT_STARTUP_JSON_PATH;
         window._currentScreenData = null;
         window._lastLoadedJsonPath = null;
         window._currentJsonPath = startupPath;
@@ -4932,7 +6397,7 @@ if (document.readyState === 'loading') {
         bindKeyboardHandlersOnce();
     });
 } else {
-    const startupPath = loadLastScreenPath() || './main_display.json';
+    const startupPath = loadLastScreenPath() || DEFAULT_STARTUP_JSON_PATH;
     window._currentScreenData = null;
     window._lastLoadedJsonPath = null;
     window._currentJsonPath = startupPath;

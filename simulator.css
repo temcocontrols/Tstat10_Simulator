@@ -3,7 +3,7 @@
     box-sizing: border-box;
 }
 
-/* Full device size; inline 320×480 was clipping the 660×880 bezel and could break lock hit-testing */
+/* Full device size; logical LCD is 240×320 (ILI9341); bezel shell stays 660×880 */
 #tstat-container.tstat-device-shell {
     position: relative;
     margin-left: auto;
@@ -19,14 +19,60 @@
     border-radius: 0 0 var(--lcd-lens-bottom-radius) var(--lcd-lens-bottom-radius);
 }
 
+/* Visual edit: invisible hit strips on LCD bounds — drag to nudge viewport (see ui-bridge.js). */
+.tstat-lcd-edge-layer {
+    pointer-events: none;
+    box-sizing: border-box;
+    z-index: 14;
+}
+body.visual-edit-shell .tstat-lcd-edge-strip {
+    position: absolute;
+    pointer-events: auto;
+    background: transparent;
+    touch-action: none;
+}
+body.visual-edit-shell .tstat-lcd-edge-strip--n {
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 12px;
+    cursor: grab;
+}
+body.visual-edit-shell .tstat-lcd-edge-strip--s {
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 12px;
+    cursor: grab;
+}
+body.visual-edit-shell .tstat-lcd-edge-strip--w {
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 12px;
+    cursor: grab;
+}
+body.visual-edit-shell .tstat-lcd-edge-strip--e {
+    top: 0;
+    bottom: 0;
+    right: 0;
+    width: 12px;
+    cursor: grab;
+}
+
+/* Reference photo: receive clicks in layout edit so it can be selected like other shell objects */
+body.visual-edit-shell #tstat-container .ref-photo-layer.ref-photo--visible {
+    pointer-events: auto;
+}
+
 #tstat-lcd-container {
-    width: 320px; /* LCD visible area */
-    height: 480px;
+    width: 240px; /* LCD visible area (240×320 ILI9341) */
+    height: 320px;
     background: var(--lcd-background-color); /* Use lcd-background-color for LCD background */
     border-radius: var(--lcd-radius);
     overflow: hidden; /* Keep all widgets clipped to LCD viewport */
     position: absolute;
-    top: 120px; /* LCD anchor in thermostat bezel */
+    top: 200px; /* Vertically centered in former 480px-tall LCD slot */
     left: 0;
     right: 0;
     margin-left: auto;
@@ -60,8 +106,8 @@
     /* Sizing and spacing variables (DO NOT CHANGE unless directed) */
     --thermostat-width: 660px;
     --thermostat-height: 880px;
-    --lcd-width: 320px;
-    --lcd-height: 480px;
+    --lcd-width: 240px;
+    --lcd-height: 320px;
     --lcd-padding-top: 40px;
     --button-gap: 17px;
     --button-bottom-space: 77.4px;
@@ -75,11 +121,11 @@
     --lcd-bezel-thickness: calc(var(--lcd-width) * 0.015); /* Bezel thickness = 1.5% of LCD width */
     --lcd-bezel-color: #888; /* Bezel color as parameter */
     --lcd-lens-thickness: 6px; /* Standalone lens thickness */
-    --lcd-lens-width: 432px;  /* Lens width: 50% wider */
-    --lcd-lens-height: 717px; /* matches Math.round(484×1.3×1.2×0.95) in network-settings-renderer.js */
+    --lcd-lens-width: 324px;  /* scaled with 240px LCD width */
+    --lcd-lens-height: 478px; /* matches scaled lens height in network-settings-renderer.js */
     --lcd-lens-bottom-radius: 32px; /* bottom corners only; top is square */
     --lcd-lens-y: 0px; /* Vertical offset for lens positioning */
-    --lcd-background-color: #2c7cc4; /* LCD background (matches screen JSON styles.bg) */
+    --lcd-background-color: #7bc2ce; /* LcdTheme.h background ≈ 0x7E19; matches screen JSON styles.bg */
     --color2: #e67e22; /* Custom color 2 */
 }
 
@@ -365,7 +411,184 @@
 }
 
 #layout-icon-palette-host {
-    min-height: 4px;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.layout-tree-panel__pane {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.layout-tree-panel__pane--assets {
+    background: #f8fafc;
+}
+
+.layout-assets-host {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 0;
+}
+
+/* SquareLine-style Assets: toolbar + scrollable list rows (not widget-grid tiles) */
+.layout-sl-assets {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    box-sizing: border-box;
+    padding: 6px 4px 8px;
+    font-family: "Segoe UI", "Inter", system-ui, sans-serif;
+}
+
+.layout-sl-assets__toolbar {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.layout-sl-assets__search {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.layout-sl-assets__toolbar-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.layout-sl-assets__toolbar-actions button {
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    background: #fff;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    color: #334155;
+}
+
+.layout-sl-assets__toolbar-actions button:hover {
+    background: #eff6ff;
+    border-color: #93c5fd;
+}
+
+.layout-sl-assets__hint {
+    margin: 0 0 6px;
+    font-size: 10px;
+    line-height: 1.35;
+    color: #64748b;
+    font-weight: 500;
+}
+
+.layout-sl-assets__hint code {
+    font-size: 9px;
+    background: #e2e8f0;
+    padding: 1px 4px;
+    border-radius: 3px;
+}
+
+.layout-sl-asset-list {
+    flex: 1;
+    min-height: 120px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    background: #fff;
+}
+
+.layout-sl-assets-section-title {
+    padding: 6px 10px 4px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #64748b;
+    background: #f1f5f9;
+    border-bottom: 1px solid #e2e8f0;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.layout-sl-asset-row {
+    display: grid;
+    grid-template-columns: 36px 1fr;
+    gap: 8px;
+    align-items: center;
+    padding: 5px 8px;
+    border-bottom: 1px solid #eef2f7;
+    cursor: grab;
+    user-select: none;
+    color: #1e293b;
+}
+
+.layout-sl-asset-row:hover {
+    background: #f8fafc;
+}
+
+.layout-sl-asset-row.is-selected {
+    background: #eff6ff;
+    box-shadow: inset 3px 0 0 #2563eb;
+}
+
+.layout-sl-asset-row--dragging {
+    opacity: 0.55;
+}
+
+.layout-sl-asset-row__thumb {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #e2e8f0;
+    border-radius: 4px;
+    background: #f8fafc;
+    color: #334155;
+}
+
+.layout-sl-asset-row__thumb svg {
+    display: block;
+    max-width: 26px;
+    max-height: 26px;
+}
+
+.layout-sl-asset-row__meta {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.layout-sl-asset-row__name {
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.layout-sl-asset-row__src {
+    font-size: 10px;
+    color: #64748b;
+}
+
+.layout-sl-assets-empty {
+    padding: 16px 12px;
+    font-size: 12px;
+    color: #64748b;
+    text-align: center;
+    line-height: 1.4;
 }
 
 /* Library icons: width handle scales the SVG to fill the label box */
@@ -504,6 +727,14 @@
     margin-bottom: 6px;
 }
 
+.layout-icon-palette__head-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
 .layout-icon-palette__head-actions button {
     border: 1px solid #cbd5e1;
     border-radius: 6px;
@@ -511,6 +742,134 @@
     padding: 3px 6px;
     font-size: 10px;
     cursor: pointer;
+}
+
+.layout-icon-palette__paste-hint {
+    font-size: 9px;
+    font-weight: 500;
+    color: #64748b;
+    max-width: 88px;
+    line-height: 1.2;
+}
+
+/* Modal: pasted PNG/JPEG — choose bitmap vs SVG <image> wrapper */
+.tstat-paste-icon-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 100200;
+    background: rgba(15, 23, 42, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    box-sizing: border-box;
+}
+
+.tstat-paste-icon-modal__box {
+    background: #ffffff;
+    color: #0f172a;
+    border-radius: 12px;
+    max-width: 520px;
+    width: 100%;
+    padding: 18px 20px;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.28);
+    box-sizing: border-box;
+}
+
+.tstat-paste-icon-modal__title {
+    margin: 0 0 6px;
+    font-size: 1.05rem;
+    font-weight: 700;
+}
+
+.tstat-paste-icon-modal__hint {
+    margin: 0 0 14px;
+    font-size: 12px;
+    color: #475569;
+    line-height: 1.45;
+}
+
+.tstat-paste-icon-modal__row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+@media (max-width: 480px) {
+    .tstat-paste-icon-modal__row {
+        grid-template-columns: 1fr;
+    }
+}
+
+.tstat-paste-icon-modal__choice {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 12px;
+    border: 2px solid #e2e8f0;
+    border-radius: 10px;
+    background: #f8fafc;
+    cursor: pointer;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.tstat-paste-icon-modal__choice:hover {
+    border-color: #3b82f6;
+    background: #eff6ff;
+}
+
+.tstat-paste-icon-modal__choice-label {
+    font-weight: 700;
+    font-size: 13px;
+}
+
+.tstat-paste-icon-modal__preview {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 120px;
+    background: #fff;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+    padding: 8px;
+}
+
+.tstat-paste-icon-modal__preview img {
+    max-width: 100%;
+    max-height: 120px;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    display: block;
+}
+
+.tstat-paste-icon-modal__choice-note {
+    font-size: 11px;
+    color: #64748b;
+    line-height: 1.35;
+}
+
+.tstat-paste-icon-modal__actions {
+    margin-top: 16px;
+    display: flex;
+    justify-content: flex-end;
+}
+
+.tstat-paste-icon-modal__cancel {
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    background: #fff;
+    padding: 8px 14px;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.tstat-paste-icon-modal__cancel:hover {
+    background: #f1f5f9;
 }
 
 .layout-icon-palette__grid {
@@ -586,7 +945,7 @@
     direction: ltr;
 }
 
-/* Chevron · type icon · label · status (SquareLine-like) */
+/* Branch · icon (drag) · label · status — screen rows use chevron+icon in first two cells */
 .layout-tree-node {
     display: grid;
     grid-template-columns: 14px 22px 1fr auto;
@@ -597,6 +956,34 @@
     border-radius: 2px;
     cursor: context-menu;
     font-weight: 400;
+}
+
+.layout-tree-node__branch-toggle {
+    font-size: 8px;
+    line-height: 1;
+    width: 14px;
+    text-align: center;
+    color: #64748b;
+    user-select: none;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.layout-tree-node__branch-toggle[role='button']:hover {
+    color: #0f172a;
+}
+
+.layout-tree-node__branch-toggle--spacer {
+    visibility: hidden;
+    pointer-events: none;
+    cursor: default;
+}
+
+.layout-tree-node__drag {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
 }
 
 .layout-tree-node__chevron {
@@ -650,6 +1037,7 @@
     font-weight: 600;
     border-bottom: 1px solid #e2e8f0;
     margin-bottom: 2px;
+    grid-template-columns: 14px 22px 1fr auto;
 }
 
 .layout-tree-node--screen .layout-tree-node__chevron {
@@ -759,6 +1147,190 @@
     color: #475569;
 }
 
+.layout-props-screen-section__field--full {
+    grid-column: 1 / -1;
+}
+
+.layout-props-screen-section__bg-text {
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 4px 6px;
+    font-size: 12px;
+}
+
+.layout-props-screen-section__bg-palette {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    margin-top: 2px;
+}
+
+.layout-props-screen-section__bg-swatch {
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 2px solid #94a3b8;
+    border-radius: 4px;
+    cursor: pointer;
+    box-sizing: border-box;
+    flex-shrink: 0;
+}
+
+.layout-props-screen-section__bg-swatch:hover {
+    border-color: #0f172a;
+    transform: scale(1.06);
+}
+
+.layout-props-screen-section__bg-swatch.is-active {
+    border-color: #0ea5e9;
+    box-shadow: 0 0 0 1px #bae6fd;
+}
+
+.layout-props-screen-section__bg-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+    margin-top: 4px;
+}
+
+.layout-props-screen-section__bg-row input[type="color"] {
+    flex-shrink: 0;
+    width: 36px;
+    height: 28px;
+    padding: 2px;
+    cursor: pointer;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    background: #fff;
+}
+
+.layout-props-screen-section__apply-wrap {
+    grid-column: 1 / -1;
+    margin-top: 4px;
+}
+
+.layout-props-screen-section__apply-btn {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 7px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    border-radius: 6px;
+    border: 1px solid #cbd5e1;
+    background: #e2e8f0;
+    color: #0f172a;
+}
+
+.layout-props-screen-section__apply-btn:hover {
+    background: #cbd5e1;
+}
+
+.layout-props-screen-section__apply-hint {
+    margin: 6px 0 0;
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 1.35;
+    color: #64748b;
+}
+
+.layout-props-screen-section__hint {
+    grid-column: 1 / -1;
+    margin: -2px 0 4px;
+    font-size: 10px;
+    font-weight: 400;
+    line-height: 1.4;
+    color: #64748b;
+}
+
+.layout-props-screen-section__hint--canvas-size {
+    margin: -4px 0 2px;
+}
+
+.layout-props-screen-section__canvas-readout {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px 12px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid #e2e8f0;
+    background: #f8fafc;
+    font-size: 11px;
+    font-weight: 600;
+    color: #475569;
+}
+
+.layout-props-screen-section__canvas-readout-label {
+    font-weight: 600;
+    color: #64748b;
+    letter-spacing: 0.02em;
+}
+
+.layout-props-screen-section__canvas-readout-value {
+    font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
+    font-size: 13px;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.layout-props-screen-section__apply-progress {
+    margin-top: 8px;
+}
+
+.layout-props-screen-section__apply-progress-track {
+    position: relative;
+    height: 6px;
+    border-radius: 3px;
+    background: #e2e8f0;
+    overflow: hidden;
+}
+
+.layout-props-screen-section__apply-progress-bar {
+    position: absolute;
+    left: -40%;
+    top: 0;
+    width: 40%;
+    height: 100%;
+    border-radius: 3px;
+    background: linear-gradient(90deg, #94a3b8, #0ea5e9, #94a3b8);
+    animation: layout-apply-progress-indeterminate 0.9s ease-in-out infinite;
+}
+
+@keyframes layout-apply-progress-indeterminate {
+    0% {
+        transform: translateX(0);
+    }
+    100% {
+        transform: translateX(350%);
+    }
+}
+
+.layout-props-screen-section__apply-progress-label {
+    display: block;
+    margin-top: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    color: #475569;
+}
+
+.layout-props-screen-section__field--row {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.layout-props-screen-section__field--row input[type="checkbox"] {
+    width: auto;
+    flex-shrink: 0;
+}
+
 .layout-props-screen-section__field input,
 .layout-props-screen-section__field select {
     width: 100%;
@@ -767,6 +1339,13 @@
     border-radius: 6px;
     padding: 4px 6px;
     font-size: 12px;
+}
+
+.layout-props-screen-section__field input:disabled {
+    opacity: 0.72;
+    cursor: not-allowed;
+    background: #f1f5f9;
+    color: #64748b;
 }
 
 .layout-props-debug-section {
@@ -973,6 +1552,13 @@
     min-width: 0;
 }
 
+.layout-tree-node__label[contenteditable="true"] {
+    user-select: text;
+    cursor: text;
+    outline: 1px dashed rgba(59, 130, 246, 0.85);
+    outline-offset: 1px;
+}
+
 .layout-tree-node__status {
     width: 8px;
     height: 8px;
@@ -1045,7 +1631,8 @@
     display: none;
 }
 
-.thermostat-lock-toggle {
+/* Bezel: toggles layout edit (lock) ↔ run/save (play). Hidden on provisioning. */
+.thermostat-shell-lock-btn {
     position: absolute;
     top: 10px;
     left: 14px;
@@ -1054,10 +1641,9 @@
     width: 44px;
     height: 44px;
     border-radius: 8px;
-    border: 1px solid #8a8a8a;
-    background: linear-gradient(180deg, #f6f6f6 0%, #e2e2e2 100%);
-    color: #333;
-    font-size: 16px;
+    border: 1px solid #6b8cae;
+    background: linear-gradient(180deg, #e8f4ff 0%, #cfe2f3 100%);
+    color: #0f172a;
     line-height: 1;
     cursor: pointer;
     z-index: 100050;
@@ -1065,47 +1651,32 @@
     pointer-events: auto;
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
-.thermostat-lock-toggle.is-active {
-    background: linear-gradient(180deg, #fde68a 0%, #f59e0b 100%);
-    border-color: #a16207;
-    color: #111827;
+.thermostat-shell-lock-btn__icon {
+    display: block;
+    flex-shrink: 0;
 }
 
-/* Provisioning: simulate phone app sending SSID + password (shown only on that screen) */
-.phone-send-creds-btn {
-    position: absolute;
-    top: 10px;
-    left: 66px;
-    min-width: 44px;
-    min-height: 44px;
-    width: 44px;
-    height: 44px;
-    border-radius: 8px;
-    border: 1px solid #6b8cae;
-    background: linear-gradient(180deg, #e8f4ff 0%, #cfe2f3 100%);
-    color: #0f172a;
-    font-size: 18px;
-    line-height: 1;
-    cursor: pointer;
-    z-index: 100049;
-    padding: 0;
-    pointer-events: auto;
-    touch-action: manipulation;
-    -webkit-tap-highlight-color: transparent;
-}
-
-.phone-send-creds-btn:hover {
+.thermostat-shell-lock-btn:hover {
     border-color: #2563eb;
     background: linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%);
 }
 
-.phone-send-creds-btn:active {
+.thermostat-shell-lock-btn:active {
     transform: translateY(1px);
 }
 
-.phone-send-creds-btn--hidden {
+.thermostat-shell-lock-btn.is-active {
+    border-color: #047857;
+    background: linear-gradient(180deg, #d1fae5 0%, #a7f3d0 100%);
+    color: #064e3b;
+}
+
+.thermostat-shell-lock-btn--hidden {
     display: none !important;
 }
 
@@ -1429,32 +2000,30 @@ body.visual-edit-shell .sls-topbar__screen {
     white-space: nowrap;
 }
 
-/* Tstat10-only: runtime vs layout edit (not in SquareLine reference) */
-body.visual-edit-shell .sls-topbar__edit-lock {
+/* SquareLine-style Run (play) — save and exit layout edit */
+body.visual-edit-shell .sls-topbar__run-preview {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 28px;
+    min-width: 30px;
     height: 26px;
-    padding: 0 6px;
-    font-size: 14px;
-    line-height: 1;
-    color: #c5d0e0;
-    background: #1e293b;
-    border: 1px solid #334155;
+    padding: 0 8px;
+    line-height: 0;
+    color: #042016;
+    background: linear-gradient(180deg, #69f0ae 0%, var(--sls-green-dim) 100%);
+    border: 1px solid #00a85c;
     border-radius: 6px;
     cursor: pointer;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.2) inset;
 }
 
-body.visual-edit-shell .sls-topbar__edit-lock:hover {
-    color: #fde68a;
-    border-color: #a16207;
+body.visual-edit-shell .sls-topbar__run-preview:hover {
+    filter: brightness(1.08);
+    border-color: var(--sls-green);
 }
 
-body.visual-edit-shell .sls-topbar__edit-lock.is-active {
-    color: #111827;
-    background: linear-gradient(180deg, #fde68a 0%, #f59e0b 100%);
-    border-color: #a16207;
+body.visual-edit-shell .sls-topbar__run-preview:active {
+    transform: translateY(1px);
 }
 
 body.visual-edit-shell .sls-topbar__fit {
@@ -1747,37 +2316,67 @@ body.visual-edit-shell .layout-tree-panel__actions button {
     padding: 4px 6px;
 }
 
-body.visual-edit-shell .layout-icon-palette {
+body.visual-edit-shell .layout-tree-panel__pane--assets {
+    background: #0d131d;
+}
+
+body.visual-edit-shell .layout-sl-assets {
+    color: #c8d5e9;
+}
+
+body.visual-edit-shell .layout-sl-assets__hint {
+    color: #8a9bb5;
+}
+
+body.visual-edit-shell .layout-sl-assets__hint code {
+    background: #1a2332;
+    color: #b9c7db;
+}
+
+body.visual-edit-shell .layout-sl-assets__toolbar-actions button {
+    background: #101722;
+    border-color: #384150;
+    color: #c8d5e9;
+}
+
+body.visual-edit-shell .layout-sl-asset-list {
     border-color: #384150;
     background: #101722;
-}
-
-body.visual-edit-shell .layout-icon-palette__head {
-    color: #c8d5e9;
-}
-
-body.visual-edit-shell .layout-icon-palette__head-actions button {
-    background: #0d131d;
-    border-color: #384150;
-    color: #c8d5e9;
-    border-radius: 4px;
-}
-
-body.visual-edit-shell .layout-icon-palette__item {
-    background: #182230;
-    border-color: #384150;
-    color: #c8d5e9;
-    border-radius: 4px;
-}
-
-body.visual-edit-shell .layout-icon-palette__item.is-selected {
-    border-color: var(--sls-green);
-    box-shadow: inset 0 0 0 1px var(--sls-green);
-    background: rgba(0, 200, 83, 0.18);
-}
-
-body.visual-edit-shell .layout-icon-palette__grid {
     scrollbar-color: #4a5568 #101722;
+}
+
+body.visual-edit-shell .layout-sl-assets-section-title {
+    background: #151d2a;
+    color: #8a9bb5;
+    border-bottom-color: #384150;
+}
+
+body.visual-edit-shell .layout-sl-asset-row {
+    border-bottom-color: #1f2937;
+    color: #e2e8f0;
+}
+
+body.visual-edit-shell .layout-sl-asset-row:hover {
+    background: #151d2a;
+}
+
+body.visual-edit-shell .layout-sl-asset-row.is-selected {
+    background: rgba(0, 200, 83, 0.12);
+    box-shadow: inset 3px 0 0 var(--sls-green);
+}
+
+body.visual-edit-shell .layout-sl-asset-row__thumb {
+    background: #151d2a;
+    border-color: #384150;
+    color: #c8d5e9;
+}
+
+body.visual-edit-shell .layout-sl-asset-row__src {
+    color: #8a9bb5;
+}
+
+body.visual-edit-shell .layout-sl-assets-empty {
+    color: #8a9bb5;
 }
 
 body.visual-edit-shell .layout-tree-panel__content {
@@ -1786,19 +2385,50 @@ body.visual-edit-shell .layout-tree-panel__content {
     font-size: 11px;
     line-height: 1.2;
     padding: 6px;
+    text-align: left;
+    direction: ltr;
 }
 
+/* Branch toggle · icon drag · label · status (same column count as light theme). */
 body.visual-edit-shell .layout-tree-node {
     border-radius: 4px;
     padding: 5px 8px;
-    gap: 6px;
-    grid-template-columns: 12px 1fr auto;
+    gap: 4px 6px;
+    grid-template-columns: 14px 18px 1fr auto;
+    justify-items: start;
 }
 
-body.visual-edit-shell .layout-tree-node__icon,
+body.visual-edit-shell .layout-tree-node__branch-toggle {
+    color: #8b98a8;
+}
+
+body.visual-edit-shell .layout-tree-node__branch-toggle[role='button']:hover {
+    color: #e8fff0;
+}
+
+body.visual-edit-shell .layout-tree-node--screen {
+    grid-template-columns: 12px 18px 1fr auto;
+}
+
+body.visual-edit-shell .layout-tree-node__icon {
+    width: 18px;
+    height: 18px;
+    justify-self: center;
+}
+
 body.visual-edit-shell .layout-tree-node__icon svg {
-    width: 12px;
-    height: 12px;
+    width: 11px;
+    height: 11px;
+}
+
+body.visual-edit-shell .layout-tree-node__label {
+    text-align: left;
+    justify-self: stretch;
+    min-width: 0;
+}
+
+body.visual-edit-shell .layout-tree-node__status {
+    justify-self: end;
 }
 
 body.visual-edit-shell .layout-tree-node:hover {
@@ -1842,7 +2472,7 @@ body.visual-edit-shell #tstat-container {
 }
 
 body.visual-edit-shell .device-bezel {
-    /* Zoom/pan applied in ui-bridge.js (translate + scale); do not override. */
+    /* Zoom/pan: same translate+scale as #layout-widgets-panel, #layout-tree-panel, #layout-props-panel (ui-bridge.js). */
     transform-origin: top center;
     margin: 0 auto;
 }
@@ -1851,16 +2481,7 @@ body.visual-edit-shell #tstat-container.tstat-container--panning-left {
     cursor: grabbing;
 }
 
-body.visual-edit-shell .thermostat-lock-toggle {
-    display: inline-flex !important;
-    align-items: center;
-    justify-content: center;
-    z-index: 100050 !important;
-    border-color: #5b6472;
-    background: linear-gradient(180deg, #f8fafc 0%, #dce3ee 100%);
-}
-
-body.visual-edit-shell .phone-send-creds-btn:not(.phone-send-creds-btn--hidden) {
+body.visual-edit-shell .thermostat-shell-lock-btn:not(.thermostat-shell-lock-btn--hidden) {
     display: inline-flex !important;
     align-items: center;
     justify-content: center;
@@ -1869,6 +2490,14 @@ body.visual-edit-shell .phone-send-creds-btn:not(.phone-send-creds-btn--hidden) 
     background: linear-gradient(180deg, #f0f7ff 0%, #dbeafe 100%);
 }
 
+body.visual-edit-shell .thermostat-shell-lock-btn.is-active:not(.thermostat-shell-lock-btn--hidden) {
+    border-color: #047857;
+    background: linear-gradient(180deg, #ecfdf5 0%, #bbf7d0 100%);
+    color: #064e3b;
+}
+
+/* Above #tstat-container (z-index 6); otherwise the device paints over the inspector. */
+body.visual-edit-shell #layout-props-panel,
 body.visual-edit-shell .layout-props-panel {
     position: fixed !important;
     right: 10px;
@@ -1883,6 +2512,7 @@ body.visual-edit-shell .layout-props-panel {
     font-family: "Segoe UI", "Inter", Arial, sans-serif;
     display: flex;
     flex-direction: column;
+    z-index: 10012;
 }
 
 body.visual-edit-shell .layout-tree-panel {
@@ -1922,6 +2552,19 @@ body.visual-edit-shell .layout-props-screen-section__field {
     color: #b8c5d9;
 }
 
+body.visual-edit-shell .layout-props-screen-section__canvas-readout {
+    background: #101319;
+    border-color: #3b4250;
+}
+
+body.visual-edit-shell .layout-props-screen-section__canvas-readout-label {
+    color: #94a3b8;
+}
+
+body.visual-edit-shell .layout-props-screen-section__canvas-readout-value {
+    color: #e2e8f0;
+}
+
 body.visual-edit-shell .layout-props-screen-section__field input,
 body.visual-edit-shell .layout-props-screen-section__field select {
     background: #101319;
@@ -1929,6 +2572,51 @@ body.visual-edit-shell .layout-props-screen-section__field select {
     color: #dbe4f3;
     border-radius: 4px;
     font-family: "Segoe UI", "Inter", Arial, sans-serif;
+}
+
+body.visual-edit-shell .layout-props-screen-section__bg-text {
+    background: #101319;
+    border-color: #3b4250;
+    color: #dbe4f3;
+    border-radius: 4px;
+}
+
+body.visual-edit-shell .layout-props-screen-section__bg-swatch {
+    border-color: #4b5568;
+}
+
+body.visual-edit-shell .layout-props-screen-section__bg-swatch:hover {
+    border-color: #94a3b8;
+}
+
+body.visual-edit-shell .layout-props-screen-section__bg-swatch.is-active {
+    border-color: #38bdf8;
+    box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.35);
+}
+
+body.visual-edit-shell .layout-props-screen-section__bg-row input[type="color"] {
+    background: #101319;
+    border-color: #3b4250;
+    border-radius: 4px;
+}
+
+body.visual-edit-shell .layout-props-screen-section__apply-progress-track {
+    background: #2a3140;
+}
+
+body.visual-edit-shell .layout-props-screen-section__apply-progress-label {
+    color: #94a3b8;
+}
+
+body.visual-edit-shell .layout-props-screen-section__field input:disabled {
+    background: #1a2029;
+    border-color: #2f3644;
+    color: #7b8798;
+    opacity: 1;
+}
+
+body.visual-edit-shell .layout-props-screen-section__hint--canvas-size {
+    color: #8b9cb0;
 }
 
 body.visual-edit-shell .layout-props-debug-section {

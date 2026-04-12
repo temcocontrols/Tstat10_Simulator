@@ -31,7 +31,7 @@ function drawCoolIcon(ctx, dx, dy, scale=1) {
   }
 }
 
-// Example usage: (in your main UI code)
-// const canvas = document.getElementById('coolicon-canvas');
-// const ctx = canvas.getContext('2d');
-// drawCoolIcon(ctx, 0, 0, 2); // scale=2 for double size
+// Exposed for demos / future wiring (Temco tooling).
+if (typeof window !== 'undefined') {
+    window.temcoDrawCoolIcon = drawCoolIcon;
+}

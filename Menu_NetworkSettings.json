@@ -2,7 +2,7 @@
   "page": "NETWORK_SETTINGS",
   "styles": {
     "bg": "#2c7cc4",
-    "highlight": "#008080",
+    "highlight": "#39757b",
     "fontFamily": "'Fira Mono', 'Consolas', 'Menlo', 'Monaco', 'Liberation Mono', 'Courier New', monospace",
     "fontSize": "24px",
     "fontWeight": "700",

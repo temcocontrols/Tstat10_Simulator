@@ -56,7 +56,7 @@ window.addEventListener('keydown', (e) => {
         } else {
             driftInterval = setInterval(() => {
                 Tstat10_Data.temp = (parseFloat(Tstat10_Data.temp) + (Math.random() * 0.4 - 0.2)).toFixed(1);
-                updateUI({ temp: Tstat10_Data.temp });
+                window.updateUI({ temp: Tstat10_Data.temp });
             }, 2000);
             console.log('Drift Enabled');
         }
